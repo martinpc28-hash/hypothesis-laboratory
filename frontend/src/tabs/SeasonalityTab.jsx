@@ -718,8 +718,9 @@ function TestResults({ result, onAudit }) {
         <p style={ui.cardSubtitle}>
           Equal-weighted portfolio of the top quartile by signal, bought at the end of the signal window and held
           through year-end, against the full equal-weighted universe over the same period (avoids look-ahead bias). S&amp;P
-          500 (SPY) and MSCI World (URTH) are added as a fixed benchmark, using the same methodology — always in USD,
-          regardless of the test's currency.
+          500 (SPY) and MSCI World (URTH) are added as a fixed benchmark using their own FULL calendar-year return
+          (buy-and-hold all year, not just the strategy's holding period) — always in USD, regardless of the test's
+          currency.
           {!strategy.sp500Available || !strategy.msciWorldAvailable ? (
             <>
               {" "}
@@ -860,7 +861,7 @@ function TestResults({ result, onAudit }) {
                       style={{ ...ui.td, ...auditableCell }}
                       title="Click to audit this number"
                       onClick={() =>
-                        onAudit({ title: `S&P 500 · ${r.year}`, subtitle: "Rest of year return (SPY, USD)", components: r.sp500ReturnAudit })
+                        onAudit({ title: `S&P 500 · ${r.year}`, subtitle: "Full calendar-year return (SPY, USD)", components: r.sp500ReturnAudit })
                       }
                     >
                       {pct(r.sp500Return)}
