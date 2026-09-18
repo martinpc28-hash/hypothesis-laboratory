@@ -518,12 +518,21 @@ const HEATMAP_FIELD_META = {
   fullYearReturn: { auditField: "fullYearAudit", label: "Return — full year" },
 };
 
-function RankingHeatmaps({ panel, tickers, yearFrom, yearTo, onAudit }) {
+// Row label for the fixed S&P 500 reference row appended to every heatmap — a string, not a
+// ticker, so it never collides with a user-selected "SPY" (the COUNTRY universe's own "United
+// States" ticker) in the row-label list, even though both would show the same underlying data.
+const SP500_ROW_LABEL = "S&P 500";
+
+function RankingHeatmaps({ panel, sp500Panel, tickers, yearFrom, yearTo, onAudit }) {
   const years = [];
   for (let y = yearFrom; y <= yearTo; y++) years.push(y);
   const byKey = new Map(panel.map((p) => [`${p.ticker}-${p.year}`, p]));
+  const sp500ByYear = new Map((sp500Panel || []).map((p) => [p.year, p]));
+  const rowLabels = [...tickers, SP500_ROW_LABEL];
 
   // Per year, who had the best signal-window return — the "winner" the user asked to see.
+  // Scoped to the user's own selected tickers only: the S&P 500 row is a fixed reference to
+  // compare against, not a candidate that can "win".
   const winnerByYear = new Map();
   for (const y of years) {
     let best = null;
@@ -538,11 +547,12 @@ function RankingHeatmaps({ panel, tickers, yearFrom, yearTo, onAudit }) {
 
   function buildCells(field, { highlightWinner = false } = {}) {
     const { auditField, label } = HEATMAP_FIELD_META[field];
-    return tickers.map((t) =>
+    return rowLabels.map((t) =>
       years.map((y) => {
-        const p = byKey.get(`${t}-${y}`);
+        const isBenchmarkRow = t === SP500_ROW_LABEL;
+        const p = isBenchmarkRow ? sp500ByYear.get(y) : byKey.get(`${t}-${y}`);
         const v = p ? p[field] : null;
-        const isWinner = highlightWinner && winnerByYear.get(y) === t;
+        const isWinner = highlightWinner && !isBenchmarkRow && winnerByYear.get(y) === t;
         const componentAudit = p ? p[auditField] : null;
         return {
           label: v === null || v === undefined ? "" : `${isWinner ? "*" : ""}${(v * 100).toFixed(0)}%`,
@@ -567,7 +577,7 @@ function RankingHeatmaps({ panel, tickers, yearFrom, yearTo, onAudit }) {
         </h4>
         <div style={ui.tableScroll}>
           <HeatmapGrid
-            rowLabels={tickers}
+            rowLabels={rowLabels}
             colLabels={years}
             cells={buildCells("signalReturn", { highlightWinner: true })}
             cellWidth={48}
@@ -578,16 +588,19 @@ function RankingHeatmaps({ panel, tickers, yearFrom, yearTo, onAudit }) {
       <div>
         <h4 style={{ margin: "0 0 8px 0", fontSize: 14 }}>Return — rest of year</h4>
         <div style={ui.tableScroll}>
-          <HeatmapGrid rowLabels={tickers} colLabels={years} cells={buildCells("restReturn")} cellWidth={44} rowLabelWidth={70} />
+          <HeatmapGrid rowLabels={rowLabels} colLabels={years} cells={buildCells("restReturn")} cellWidth={44} rowLabelWidth={70} />
         </div>
       </div>
       <div>
         <h4 style={{ margin: "0 0 8px 0", fontSize: 14 }}>Return — full year</h4>
         <div style={ui.tableScroll}>
-          <HeatmapGrid rowLabels={tickers} colLabels={years} cells={buildCells("fullYearReturn")} cellWidth={44} rowLabelWidth={70} />
+          <HeatmapGrid rowLabels={rowLabels} colLabels={years} cells={buildCells("fullYearReturn")} cellWidth={44} rowLabelWidth={70} />
         </div>
       </div>
-      <p style={{ ...ui.muted, margin: 0 }}>Click any cell with a value to see the exact calculation (dates and prices used).</p>
+      <p style={{ ...ui.muted, margin: 0 }}>
+        Click any cell with a value to see the exact calculation (dates and prices used). The "{SP500_ROW_LABEL}" row
+        is a fixed benchmark (SPY, USD), always shown for comparison — it never counts as the year's winner.
+      </p>
     </div>
   );
 }
@@ -661,7 +674,14 @@ function TestResults({ result, onAudit }) {
 
       <div style={ui.card}>
         <h3 style={ui.cardTitle}>Return heatmap by year</h3>
-        <RankingHeatmaps panel={panel} tickers={tickers} yearFrom={meta.yearFrom} yearTo={meta.yearTo} onAudit={onAudit} />
+        <RankingHeatmaps
+          panel={panel}
+          sp500Panel={result.sp500Panel}
+          tickers={tickers}
+          yearFrom={meta.yearFrom}
+          yearTo={meta.yearTo}
+          onAudit={onAudit}
+        />
       </div>
 
       <div style={ui.card}>

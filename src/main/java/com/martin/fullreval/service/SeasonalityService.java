@@ -138,6 +138,18 @@ public class SeasonalityService {
         Map<Integer, ReturnCalc> msciWorldRest = restReturnSeriesFromCloses("URTH", urthCloses, req.yearFrom, req.yearTo, req.signalStartMonth, req.signalLengthMonths);
         result.put("strategy", strategyBacktest(statsPoints, sp500Rest, msciWorldRest, closesByTicker, spyCloses, urthCloses,
                 req.signalStartMonth, req.signalLengthMonths));
+
+        // S&P 500 signal/rest/full-year returns per year, as a fixed reference row for the
+        // return heatmaps — kept separate from "panel" (rather than just adding "SPY" into it)
+        // so it never collides with a user-selected SPY (the COUNTRY universe's "United States"
+        // ticker is SPY itself) and never leaks into the correlation/persistence/winner stats,
+        // which must stay scoped to the user's own chosen universe. Reuses spyCloses already
+        // fetched above for the strategy chart, so this is free of extra network calls.
+        List<Point> sp500Points = new ArrayList<>();
+        for (int year = req.yearFrom; year <= req.yearTo; year++) {
+            sp500Points.add(computePoint("SPY", year, spyCloses, req.signalStartMonth, req.signalLengthMonths));
+        }
+        result.put("sp500Panel", sp500Points.stream().map(this::pointToMap).toList());
         return result;
     }
 
