@@ -223,11 +223,26 @@ public class SeasonalityService {
                                 double totalReturn, double cagr, double volatility, double maxDrawdown, double score,
                                 Map<Integer, List<String>> topQuartileByYear) {}
 
+    /** Picks out whichever number "rankBy" says "best" means, so the SAME comparison drives both
+     * which single candidate wins each (universe, window) cell in FIXED/ROTATING_SUBSET mode, and
+     * the final ordering of all cells — see SeasonalityMonteCarloRequest.rankBy's javadoc. */
+    private static double metricOf(ComboResult c, String rankBy) {
+        return switch (rankBy) {
+            case "CAGR" -> c.cagr();
+            case "TOTAL_RETURN" -> c.totalReturn();
+            default -> c.score();
+        };
+    }
+
     public Map<String, Object> runMonteCarlo(SeasonalityMonteCarloRequest req) {
         validateYearRange(req.yearFrom, req.yearTo);
         String modeUpper = req.mode == null ? "ROTATING" : req.mode.toUpperCase();
         boolean fixedMode = "FIXED".equals(modeUpper);
         boolean rotatingSubsetMode = "ROTATING_SUBSET".equals(modeUpper);
+        String rankBy = req.rankBy == null ? "SCORE" : req.rankBy.toUpperCase();
+        if (!rankBy.equals("SCORE") && !rankBy.equals("CAGR") && !rankBy.equals("TOTAL_RETURN")) {
+            throw new IllegalArgumentException("rankBy must be SCORE, CAGR, or TOTAL_RETURN");
+        }
         if ((fixedMode || rotatingSubsetMode) && (req.fixedSize == null || req.fixedSize < 2)) {
             throw new IllegalArgumentException("For this mode, pick a number of assets >= 2");
         }
@@ -264,10 +279,10 @@ public class SeasonalityService {
                     ComboResult combo;
                     if (fixedMode) {
                         combo = bestFixedCombo(universe, tickers, closesByTicker, startMonth, lengthMonths,
-                                req.yearFrom, req.yearTo, req.fixedSize, minYearsUsed);
+                                req.yearFrom, req.yearTo, req.fixedSize, minYearsUsed, rankBy);
                     } else if (rotatingSubsetMode) {
                         combo = bestRotatingSubsetCombo(universe, tickers, closesByTicker, startMonth, lengthMonths,
-                                req.yearFrom, req.yearTo, req.fixedSize, minYearsUsed);
+                                req.yearFrom, req.yearTo, req.fixedSize, minYearsUsed, rankBy);
                     } else {
                         List<Point> allPoints = new ArrayList<>();
                         for (String ticker : tickers) {
@@ -296,7 +311,7 @@ public class SeasonalityService {
         int discardedForShortSample = (int) results.stream().filter(r -> r.yearsUsed() < minYearsUsed).count();
         results = new ArrayList<>(results.stream().filter(r -> r.yearsUsed() >= minYearsUsed).toList());
 
-        results.sort(Comparator.comparingDouble(ComboResult::score).reversed());
+        results.sort(Comparator.comparingDouble((ComboResult c) -> metricOf(c, rankBy)).reversed());
         List<Map<String, Object>> combosJson = results.stream().map(this::comboToMap).toList();
 
         Map<String, Object> result = new LinkedHashMap<>();
@@ -311,6 +326,7 @@ public class SeasonalityService {
         meta.put("mode", modeUpper);
         meta.put("fixedSize", req.fixedSize);
         meta.put("minYearsUsed", minYearsUsed);
+        meta.put("rankBy", rankBy);
         meta.put("discardedForShortSample", discardedForShortSample);
         meta.put("combosEvaluated", combosJson.size());
         result.put("meta", meta);
@@ -335,7 +351,8 @@ public class SeasonalityService {
 
     private ComboResult bestFixedCombo(String universeLabel, List<String> tickers,
                                         Map<String, NavigableMap<LocalDate, BigDecimal>> closesByTicker,
-                                        int startMonth, int lengthMonths, int yearFrom, int yearTo, int fixedSize, int minYearsUsed) {
+                                        int startMonth, int lengthMonths, int yearFrom, int yearTo, int fixedSize, int minYearsUsed,
+                                        String rankBy) {
         List<Integer> years = new ArrayList<>();
         for (int year = yearFrom; year <= yearTo; year++) years.add(year);
 
@@ -373,9 +390,10 @@ public class SeasonalityService {
             ComboResult candidate = evaluateFixedCombo(universeLabel, quick.get(i).subset(), restCache, precomputed, startMonth, lengthMonths, yearFrom, yearTo);
             // minYearsUsed is enforced HERE, not as a filter after this method returns — this
             // method only ever returns its single best candidate for the window, so if a
-            // short-sample fluke won on score alone, a longer-history runner-up would already
-            // be gone by the time a post-hoc filter got to look at it.
-            if (candidate != null && candidate.yearsUsed() >= minYearsUsed && (best == null || candidate.score() > best.score())) {
+            // short-sample fluke won on rankBy's metric alone, a longer-history runner-up would
+            // already be gone by the time a post-hoc filter got to look at it.
+            if (candidate != null && candidate.yearsUsed() >= minYearsUsed
+                    && (best == null || metricOf(candidate, rankBy) > metricOf(best, rankBy))) {
                 best = candidate;
             }
         }
@@ -541,7 +559,8 @@ public class SeasonalityService {
      * subset each year (unlike FIXED mode, which only ever needs rest-of-year). */
     private ComboResult bestRotatingSubsetCombo(String universeLabel, List<String> tickers,
                                                  Map<String, NavigableMap<LocalDate, BigDecimal>> closesByTicker,
-                                                 int startMonth, int lengthMonths, int yearFrom, int yearTo, int subsetSize, int minYearsUsed) {
+                                                 int startMonth, int lengthMonths, int yearFrom, int yearTo, int subsetSize, int minYearsUsed,
+                                                 String rankBy) {
         List<Integer> years = new ArrayList<>();
         for (int year = yearFrom; year <= yearTo; year++) years.add(year);
 
@@ -581,7 +600,8 @@ public class SeasonalityService {
                     startMonth, lengthMonths, yearFrom, yearTo);
             // See bestFixedCombo for why minYearsUsed has to be enforced here rather than as a
             // filter applied after this method returns its single best-per-window candidate.
-            if (candidate != null && candidate.yearsUsed() >= minYearsUsed && (best == null || candidate.score() > best.score())) {
+            if (candidate != null && candidate.yearsUsed() >= minYearsUsed
+                    && (best == null || metricOf(candidate, rankBy) > metricOf(best, rankBy))) {
                 best = candidate;
             }
         }
@@ -1025,6 +1045,15 @@ public class SeasonalityService {
             cumulative.add(point);
         }
 
+        // Annualized (CAGR) versions of the same cumulative multipliers above — the stats table
+        // shows this alongside volatility/max drawdown so "how much did it actually make per
+        // year" doesn't have to be eyeballed off the raw total-return chart.
+        int yearsCompounded = perYear.size();
+        double strategyCagr = yearsCompounded == 0 ? 0.0 : Math.pow(cumStrategy, 1.0 / yearsCompounded) - 1.0;
+        double benchmarkCagr = yearsCompounded == 0 ? 0.0 : Math.pow(cumBenchmark, 1.0 / yearsCompounded) - 1.0;
+        double sp500Cagr = yearsCompounded == 0 ? 0.0 : Math.pow(cumSp500, 1.0 / yearsCompounded) - 1.0;
+        double msciWorldCagr = yearsCompounded == 0 ? 0.0 : Math.pow(cumMsciWorld, 1.0 / yearsCompounded) - 1.0;
+
         // Which tickers make up each series, per year — needed to build the real daily wealth
         // curve below (both for volatility AND for max drawdown, so a mid-year dip that fully
         // recovers by December — invisible if you only look at year-end snapshots — actually
@@ -1066,13 +1095,13 @@ public class SeasonalityService {
         }
 
         Map<String, Object> stats = new LinkedHashMap<>();
-        stats.put("strategy", Map.of("volatility", strategyDaily.volatility(), "maxDrawdown", strategyDaily.maxDrawdown()));
-        stats.put("benchmark", Map.of("volatility", benchmarkDaily.volatility(), "maxDrawdown", benchmarkDaily.maxDrawdown()));
+        stats.put("strategy", Map.of("cagr", strategyCagr, "volatility", strategyDaily.volatility(), "maxDrawdown", strategyDaily.maxDrawdown()));
+        stats.put("benchmark", Map.of("cagr", benchmarkCagr, "volatility", benchmarkDaily.volatility(), "maxDrawdown", benchmarkDaily.maxDrawdown()));
         if (includeSp500) {
-            stats.put("sp500", Map.of("volatility", sp500Daily.volatility(), "maxDrawdown", sp500Daily.maxDrawdown()));
+            stats.put("sp500", Map.of("cagr", sp500Cagr, "volatility", sp500Daily.volatility(), "maxDrawdown", sp500Daily.maxDrawdown()));
         }
         if (includeMsciWorld) {
-            stats.put("msciWorld", Map.of("volatility", msciDaily.volatility(), "maxDrawdown", msciDaily.maxDrawdown()));
+            stats.put("msciWorld", Map.of("cagr", msciWorldCagr, "volatility", msciDaily.volatility(), "maxDrawdown", msciDaily.maxDrawdown()));
         }
 
         Map<String, Object> result = new LinkedHashMap<>();

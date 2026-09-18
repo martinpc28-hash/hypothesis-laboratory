@@ -83,6 +83,13 @@ export default function SeasonalityTab({ setStatus }) {
   // recently) can show a deceptively high score from a short, lucky sample. Null = let the
   // backend default to half the requested year range.
   const [mcMinYearsUsed, setMcMinYearsUsed] = useState(null);
+  // What "best" means: this drives which single candidate wins each (universe, window) cell in
+  // FIXED/ROTATING_SUBSET mode, not just how the results table is displayed afterward — a
+  // different pair can genuinely win the SAME window under a different criterion, e.g. one with
+  // higher raw return but more volatility than the risk-adjusted winner. That's why this has to
+  // be a real search parameter (sent to the backend, triggers a re-run), not a client-side sort
+  // of already-computed rows.
+  const [mcRankBy, setMcRankBy] = useState("SCORE");
   const [mcResult, setMcResult] = useState(null);
   const [mcLoading, setMcLoading] = useState(false);
 
@@ -227,6 +234,7 @@ export default function SeasonalityTab({ setStatus }) {
         mode: mcMode,
         fixedSize: mcMode === "FIXED" || mcMode === "ROTATING_SUBSET" ? mcFixedSize : undefined,
         minYearsUsed: mcMinYearsUsed,
+        rankBy: mcRankBy,
       });
       setMcResult(result);
     } catch (e) {
@@ -413,6 +421,8 @@ export default function SeasonalityTab({ setStatus }) {
         setMcForceJanuary={setMcForceJanuary}
         mcMinYearsUsed={mcMinYearsUsed}
         setMcMinYearsUsed={setMcMinYearsUsed}
+        mcRankBy={mcRankBy}
+        setMcRankBy={setMcRankBy}
         mcLoading={mcLoading}
         onRun={runMonteCarlo}
         mcResult={mcResult}
@@ -746,6 +756,7 @@ function TestResults({ result, onAudit }) {
             <thead>
               <tr>
                 <th style={ui.th}>Series</th>
+                <th style={ui.th}>Annualized return (CAGR)</th>
                 <th style={ui.th}>Annualized volatility</th>
                 <th style={ui.th}>Maximum drawdown</th>
               </tr>
@@ -761,6 +772,9 @@ function TestResults({ result, onAudit }) {
                 .map((s) => (
                   <tr key={s.key}>
                     <td style={ui.td}>{s.label}</td>
+                    <td style={{ ...ui.td, color: strategy.stats[s.key].cagr >= 0 ? colors.success : colors.danger, fontWeight: 700 }}>
+                      {pct(strategy.stats[s.key].cagr)}
+                    </td>
                     <td style={ui.td}>{pct(strategy.stats[s.key].volatility)}</td>
                     <td style={{ ...ui.td, color: colors.danger, fontWeight: 700 }}>
                       {pct(strategy.stats[s.key].maxDrawdown)}
@@ -955,6 +969,8 @@ function MonteCarloSection({
   setMcForceJanuary,
   mcMinYearsUsed,
   setMcMinYearsUsed,
+  mcRankBy,
+  setMcRankBy,
   mcLoading,
   onRun,
   mcResult,
@@ -968,9 +984,10 @@ function MonteCarloSection({
       <p style={ui.cardSubtitle}>
         Tests EVERY valid combination of universe (sectors and/or countries — never mixed in the same
         portfolio) × signal window (start month × length), and ranks them by risk-adjusted return (CAGR ÷
-        volatility) to find which one would historically have delivered the most return for the least volatility. It's
-        an exhaustive sweep — it evaluates every possible combination, not a random sample — but we call it "Monte
-        Carlo" as requested. Always in USD, so sectors and countries can be compared in one table.
+        volatility) by default — or by raw CAGR or total return instead, see "Rank combinations by" below — to
+        find which one would historically have performed best on that measure. It's an exhaustive sweep — it
+        evaluates every possible combination, not a random sample — but we call it "Monte Carlo" as requested.
+        Always in USD, so sectors and countries can be compared in one table.
       </p>
 
       <div style={{ marginBottom: 16 }}>
@@ -1030,6 +1047,22 @@ function MonteCarloSection({
             </span>
           </label>
         </div>
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <p style={{ fontSize: 13, color: colors.textMuted, margin: "0 0 6px 0", fontWeight: 600 }}>Rank combinations by</p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {RANK_BY_OPTIONS.map((o) => (
+            <button key={o.key} style={ui.button(mcRankBy === o.key ? "primary" : "secondary")} onClick={() => setMcRankBy(o.key)}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+        <p style={{ ...ui.muted, marginTop: 6 }}>
+          This changes which candidate actually wins each window in "Rotate the winner within a chosen group" and
+          "Fixed portfolio" mode — not just how the results table below is sorted. A different combination can be the
+          real winner for the SAME window under a different ranking.
+        </p>
       </div>
 
       <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
@@ -1134,6 +1167,17 @@ const MODE_LABELS = {
   FIXED: `Fixed portfolio`,
 };
 
+// What "best" means is subjective: someone who cares about raw return over smoothness wants the
+// highest CAGR or total return, even if it came with more volatility, instead of the risk-
+// adjusted winner. This has to be a real backend search parameter (see mcRankBy in
+// MonteCarloSection), not a client-side re-sort — a different combination can genuinely win the
+// SAME window under a different criterion.
+const RANK_BY_OPTIONS = [
+  { key: "SCORE", label: "Risk-adjusted (CAGR ÷ Vol)" },
+  { key: "CAGR", label: "CAGR" },
+  { key: "TOTAL_RETURN", label: "Total return" },
+];
+
 function MonteCarloResults({ result }) {
   const { meta, combos, best } = result;
   const [picksDetail, setPicksDetail] = useState(null);
@@ -1150,6 +1194,8 @@ function MonteCarloResults({ result }) {
     );
   }
 
+  const rankLabel = (RANK_BY_OPTIONS.find((o) => o.key === meta.rankBy) || RANK_BY_OPTIONS[0]).label;
+
   return (
     <div style={{ marginTop: 20 }}>
       <p style={ui.muted}>
@@ -1157,6 +1203,7 @@ function MonteCarloResults({ result }) {
         {MODE_LABELS[meta.mode] || meta.mode}
         {(meta.mode === "FIXED" || meta.mode === "ROTATING_SUBSET") && ` of ${meta.fixedSize} assets`}
         {meta.startMonths && meta.startMonths.length === 1 && meta.startMonths[0] === 1 && " · signal forced to January"}
+        · ranked by {rankLabel}
         {meta.discardedForShortSample > 0 &&
           ` · ${meta.discardedForShortSample} combination(s) with fewer than ${meta.minYearsUsed} years discarded`}
       </p>
@@ -1176,7 +1223,7 @@ function MonteCarloResults({ result }) {
           }}
         >
           <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, color: colors.primary }}>
-            Optimal combination (highest risk-adjusted return)
+            Optimal combination (highest {rankLabel})
           </div>
           <div style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>
             {UNIVERSE_LABELS[best.universe]} · Signal {windowLabel(best.startMonth, best.lengthMonths)}
@@ -1267,8 +1314,11 @@ function MonteCarloResults({ result }) {
 
       <p style={{ ...ui.muted, marginTop: 8 }}>
         Score = CAGR ÷ annualized volatility (similar to a Sharpe ratio, but without subtracting the risk-free
-        rate) — used only to RANK combinations against each other, not a standalone standard financial metric. This
-        is a historical backtest: it doesn't guarantee the same combination will repeat in the future.
+        rate) — one way to RANK combinations against each other, not a standalone standard financial metric. It isn't
+        always the same ranking as raw return: a combo with a lower score can still have a higher CAGR or total
+        return if it came with more volatility — use "Rank combinations by" above to search for the best one by that
+        criterion instead. This is a historical backtest either way: it doesn't guarantee the same combination will
+        repeat in the future.
       </p>
 
       {picksDetail && <ComboPicksDrawer detail={picksDetail} onClose={() => setPicksDetail(null)} />}

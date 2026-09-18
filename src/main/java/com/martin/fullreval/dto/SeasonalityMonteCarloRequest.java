@@ -33,4 +33,10 @@ public class SeasonalityMonteCarloRequest {
     // any combo using fewer years than this before ranking. Null defaults to half the requested
     // year range (min 2), so the ranking favors combos with a genuinely long track record.
     public Integer minYearsUsed;
+    // What "best" means, both for which single candidate wins each (universe, window) cell in
+    // FIXED/ROTATING_SUBSET mode, and for the final ordering of all cells: "SCORE" (default,
+    // CAGR ÷ volatility — favors smoother return), "CAGR", or "TOTAL_RETURN" (both favor raw
+    // return regardless of volatility). A different candidate can legitimately win the SAME
+    // window under a different criterion — this isn't just a display sort order.
+    public String rankBy = "SCORE"; // "SCORE" | "CAGR" | "TOTAL_RETURN"
 }
