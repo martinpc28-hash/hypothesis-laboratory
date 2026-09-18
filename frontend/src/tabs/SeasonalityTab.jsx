@@ -59,6 +59,14 @@ export default function SeasonalityTab({ setStatus }) {
   const [sweepLoading, setSweepLoading] = useState(false);
   const [audit, setAudit] = useState(null);
 
+  // Macro regime context for whatever combo is currently shown above (e.g. XLK+XLE): does its
+  // edge hold up across inflation/growth/rate/yield-curve/VIX regimes, or is it concentrated in
+  // one of them? Separate from testResult/testLoading since it's an optional, heavier follow-up
+  // (5 extra FRED series) the user asks for explicitly rather than something that should slow
+  // down the main test's own auto-run.
+  const [macroResult, setMacroResult] = useState(null);
+  const [macroLoading, setMacroLoading] = useState(false);
+
   // Combinatorial optimizer ("Monte Carlo" per the user's ask) — tries every valid
   // (universe, signal window) combination and ranks by risk-adjusted return. Always USD:
   // mixing currencies into one return/volatility ranking across countries and sectors
@@ -152,6 +160,7 @@ export default function SeasonalityTab({ setStatus }) {
     }
     setTestLoading(true);
     setStatus(null);
+    setMacroResult(null); // stale otherwise — it's specific to the ticker set/window being replaced
     try {
       const result = await api.runSeasonalityTest({
         tickers,
@@ -168,6 +177,29 @@ export default function SeasonalityTab({ setStatus }) {
       setStatus({ type: "error", text: `Test failed: ${e.message}` });
     } finally {
       setTestLoading(false);
+    }
+  }
+
+  async function runMacroInsights() {
+    if (activeTickers.length < 2) return;
+    setMacroLoading(true);
+    setStatus(null);
+    try {
+      const result = await api.runSeasonalityMacroInsights({
+        tickers: activeTickers,
+        dataSource,
+        currencyMode: universeType === "COUNTRY" ? currencyMode : "USD",
+        yearFrom,
+        yearTo,
+        signalStartMonth,
+        signalLengthMonths,
+        minAssetsPerYear,
+      });
+      setMacroResult(result);
+    } catch (e) {
+      setStatus({ type: "error", text: `Macro insights failed: ${e.message}` });
+    } finally {
+      setMacroLoading(false);
     }
   }
 
@@ -399,7 +431,15 @@ export default function SeasonalityTab({ setStatus }) {
         </div>
       </div>
 
-      {testResult && <TestResults result={testResult} onAudit={setAudit} />}
+      {testResult && (
+        <TestResults
+          result={testResult}
+          onAudit={setAudit}
+          macroResult={macroResult}
+          macroLoading={macroLoading}
+          onRunMacroInsights={runMacroInsights}
+        />
+      )}
       {sweepResult && <SweepResults result={sweepResult} />}
 
       <MonteCarloSection
@@ -658,7 +698,7 @@ function DiffScoreRow({ perYear, diffKey, cumulative, strategyCumKey, benchmarkC
   );
 }
 
-function TestResults({ result, onAudit }) {
+function TestResults({ result, onAudit, macroResult, macroLoading, onRunMacroInsights }) {
   const { meta, panel, coverage, correlationVsRest, correlationVsFullYear, persistenceVsRest, persistenceVsFullYear, strategy } = result;
   const tickers = meta.tickers;
 
@@ -904,6 +944,145 @@ function TestResults({ result, onAudit }) {
             </table>
           </div>
         )}
+      </div>
+
+      <MacroInsightsSection
+        tickers={tickers}
+        macroResult={macroResult}
+        macroLoading={macroLoading}
+        onRun={onRunMacroInsights}
+      />
+    </div>
+  );
+}
+
+// Friendly label + unit formatter for each macro feature the backend's split-finder can pick —
+// kept here rather than sent from the backend since it's pure display concern. inflationYoY/
+// growthYoY are fractions (0.042 = 4.2%); rateLevel/rateChangeYoY/yieldCurveSlope are already in
+// percentage points as FRED publishes them; vixAverage is a plain index level, not a percentage.
+const MACRO_FEATURE_META = {
+  inflationYoY: { label: "Inflation (YoY, CPI)", format: (v) => pct(v, 1) },
+  growthYoY: { label: "Growth (YoY, Industrial Production)", format: (v) => pct(v, 1) },
+  rateLevel: { label: "10-Year Treasury yield", format: (v) => `${v.toFixed(2)}%` },
+  rateChangeYoY: { label: "10-Year yield, change vs. a year ago", format: (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}pp` },
+  yieldCurveSlope: { label: "Yield curve slope (10Y − 2Y)", format: (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}pp` },
+  vixAverage: { label: "VIX (average during the signal window)", format: (v) => v.toFixed(1) },
+};
+
+function macroCell(value) {
+  return value === null || value === undefined ? "—" : value;
+}
+
+function MacroInsightsSection({ tickers, macroResult, macroLoading, onRun }) {
+  return (
+    <div style={ui.card}>
+      <h3 style={ui.cardTitle}>Macro regime context</h3>
+      <p style={ui.cardSubtitle}>
+        Does this combo's edge ({tickers.join("+")}) hold up across different economic backdrops, or is it
+        concentrated in one of them? Pulls inflation (CPI), growth (Industrial Production), the 10-Year Treasury
+        yield, the 10Y-2Y yield curve slope, and the VIX from FRED for each year — all "as of" the moment the signal
+        window ends, never later, so nothing here could have leaked into a real decision after the fact — then
+        searches for the single macro reading that best separates the years this combo worked from the years it
+        didn't.
+      </p>
+
+      {!macroResult && (
+        <button style={ui.button("secondary")} onClick={onRun} disabled={macroLoading}>
+          {macroLoading ? "Fetching macro data…" : "Run macro regime analysis"}
+        </button>
+      )}
+
+      {macroResult && <MacroInsightsResult result={macroResult} />}
+    </div>
+  );
+}
+
+function MacroInsightsResult({ result }) {
+  const { meta, yearly, bestSplit } = result;
+
+  return (
+    <div>
+      <p style={ui.muted}>
+        {meta.source} · {meta.yearFrom}–{meta.yearTo} · {meta.yearsUsed} years with data
+      </p>
+
+      {bestSplit ? (
+        <div
+          style={{
+            background: colors.primarySoft,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 10,
+            padding: 16,
+            marginTop: 8,
+            marginBottom: 16,
+          }}
+        >
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, color: colors.primary }}>
+            Best-separating macro split
+          </div>
+          <p style={{ margin: "6px 0 12px 0", fontSize: 14 }}>
+            When <strong>{MACRO_FEATURE_META[bestSplit.feature]?.label || bestSplit.feature}</strong> was{" "}
+            <strong>below {MACRO_FEATURE_META[bestSplit.feature]?.format(bestSplit.threshold) ?? bestSplit.threshold}</strong>,
+            this combo's edge worked in <strong style={{ color: colors.success }}>{pct(bestSplit.hitRateBelow, 0)}</strong> of{" "}
+            {bestSplit.nBelow} years (avg edge {pct(bestSplit.meanDiffBelow)}). Above that threshold, it worked in{" "}
+            <strong style={{ color: bestSplit.hitRateAbove >= 0.5 ? colors.success : colors.danger }}>
+              {pct(bestSplit.hitRateAbove, 0)}
+            </strong>{" "}
+            of {bestSplit.nAbove} years (avg edge {pct(bestSplit.meanDiffAbove)}).
+          </p>
+          <p style={{ ...ui.muted, margin: 0 }}>
+            This is the single best split out of 6 macro features tested — a one-level decision tree (a "stump"),
+            deliberately kept this simple because {meta.yearsUsed} yearly observations isn't enough data to trust
+            anything with more moving parts. Treat this as a hypothesis worth watching going forward, not a
+            statistically proven rule — it was found by looking at the same years it's being reported on, so some of
+            this apparent pattern is expected to be noise even if the underlying effect is real.
+          </p>
+        </div>
+      ) : (
+        <p style={{ ...ui.muted, marginTop: 8 }}>
+          No macro feature separated the good years from the bad years by enough margin (or a group would have needed
+          fewer years than a sane minimum) — no split shown, on purpose, rather than forcing one that isn't real.
+        </p>
+      )}
+
+      <div style={ui.tableScroll}>
+        <table style={ui.table}>
+          <thead>
+            <tr>
+              <th style={ui.th}>Year</th>
+              <th style={ui.th}>Edge</th>
+              <th style={ui.th}>Hit</th>
+              <th style={ui.th}>Inflation (YoY)</th>
+              <th style={ui.th}>Growth (YoY)</th>
+              <th style={ui.th}>10Y yield</th>
+              <th style={ui.th}>10Y yield Δ (YoY)</th>
+              <th style={ui.th}>Yield curve (10Y−2Y)</th>
+              <th style={ui.th}>VIX (avg)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {yearly.map((r) => (
+              <tr key={r.year}>
+                <td style={ui.td}>{r.year}</td>
+                <td style={{ ...ui.td, color: r.diff >= 0 ? colors.success : colors.danger, fontWeight: 700 }}>
+                  {r.diff >= 0 ? "+" : ""}
+                  {pct(r.diff)}
+                </td>
+                <td style={ui.td}>{r.hit ? "✓" : "✕"}</td>
+                <td style={ui.td}>{r.inflationYoY === null ? "—" : pct(r.inflationYoY, 1)}</td>
+                <td style={ui.td}>{r.growthYoY === null ? "—" : pct(r.growthYoY, 1)}</td>
+                <td style={ui.td}>{r.rateLevel === null ? "—" : `${r.rateLevel.toFixed(2)}%`}</td>
+                <td style={ui.td}>
+                  {r.rateChangeYoY === null ? "—" : `${r.rateChangeYoY >= 0 ? "+" : ""}${r.rateChangeYoY.toFixed(2)}pp`}
+                </td>
+                <td style={ui.td}>
+                  {r.yieldCurveSlope === null ? "—" : `${r.yieldCurveSlope >= 0 ? "+" : ""}${r.yieldCurveSlope.toFixed(2)}pp`}
+                </td>
+                <td style={ui.td}>{macroCell(r.vixAverage === null ? null : r.vixAverage.toFixed(1))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

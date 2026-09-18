@@ -56,6 +56,13 @@ public class SeasonalityController {
         return seasonalityService.runMonteCarlo(req);
     }
 
+    /** Macro regime insights for a fixed ticker set: does this combo's edge hold up across
+     * inflation/growth/rate/yield-curve/VIX regimes, or is it concentrated in one of them? */
+    @PostMapping("/macro-insights")
+    public Map<String, Object> macroInsights(@RequestBody SeasonalityTestRequest req) {
+        return seasonalityService.runMacroInsights(req);
+    }
+
     @ExceptionHandler({IllegalArgumentException.class, IllegalStateException.class})
     public ResponseEntity<Map<String, String>> handleBadRequest(RuntimeException e) {
         HttpStatus status = e instanceof IllegalArgumentException ? HttpStatus.BAD_REQUEST : HttpStatus.BAD_GATEWAY;

@@ -51,4 +51,5 @@ export const api = {
   runSeasonalityTest: (body) => request(`/api/seasonality/test`, postJson(body)),
   runSeasonalitySweep: (body) => request(`/api/seasonality/sweep`, postJson(body)),
   runSeasonalityMonteCarlo: (body) => request(`/api/seasonality/montecarlo`, postJson(body)),
+  runSeasonalityMacroInsights: (body) => request(`/api/seasonality/macro-insights`, postJson(body)),
 };
