@@ -957,6 +957,7 @@ function TestResults({ result, onAudit, macroResult, macroLoading, onRunMacroIns
 
       <MacroInsightsSection
         tickers={tickers}
+        strategy={strategy}
         macroResult={macroResult}
         macroLoading={macroLoading}
         onRun={onRunMacroInsights}
@@ -982,7 +983,7 @@ const MACRO_FEATURE_META = {
   vixAverage: { label: "VIX (average during the signal window)", format: (v) => v.toFixed(1) },
 };
 
-function MacroInsightsSection({ tickers, macroResult, macroLoading, onRun, onAudit, onMacroAudit, onEdgeAudit, onMacroPickReason }) {
+function MacroInsightsSection({ tickers, strategy, macroResult, macroLoading, onRun, onAudit, onMacroAudit, onEdgeAudit, onMacroPickReason }) {
   return (
     <div style={ui.card}>
       <h3 style={ui.cardTitle}>Macro regime context</h3>
@@ -1004,6 +1005,7 @@ function MacroInsightsSection({ tickers, macroResult, macroLoading, onRun, onAud
       {macroResult && (
         <MacroInsightsResult
           result={macroResult}
+          strategy={strategy}
           onAudit={onAudit}
           onMacroAudit={onMacroAudit}
           onEdgeAudit={onEdgeAudit}
@@ -1042,8 +1044,8 @@ function macroPickFor(row, assetSplit) {
   return tickerAShare >= 0.5 ? assetSplit.tickerA : assetSplit.tickerB;
 }
 
-function MacroInsightsResult({ result, onAudit, onMacroAudit, onEdgeAudit, onMacroPickReason }) {
-  const { meta, yearly, edgeSplit, assetSplit, liveRead } = result;
+function MacroInsightsResult({ result, strategy, onAudit, onMacroAudit, onEdgeAudit, onMacroPickReason }) {
+  const { meta, yearly, edgeSplit, assetSplit, liveRead, macroFilteredStrategy } = result;
   const byKey = (row, feature) => (row.macroAudit ? row.macroAudit[feature] : null);
   const showAssetCols = meta.tickers.length === 2;
 
@@ -1254,6 +1256,88 @@ function MacroInsightsResult({ result, onAudit, onMacroAudit, onEdgeAudit, onMac
           </tbody>
         </table>
       </div>
+
+      {macroFilteredStrategy && strategy && (
+        <MacroFilteredStrategySection macroFilteredStrategy={macroFilteredStrategy} strategy={strategy} tickers={meta.tickers} />
+      )}
+    </div>
+  );
+}
+
+// "What if you'd followed the macro filter every year instead of the raw signal (always deferring
+// to macro on disagreement, since agreement is a no-op)" — plotted alongside the same Top
+// quartile/Universe/S&P 500 lines already shown above, plus the head-to-head stats comparison and
+// the agree/disagree tally, so the macro filter's actual track record is never left implicit.
+function MacroFilteredStrategySection({ macroFilteredStrategy, strategy, tickers }) {
+  const cumByYear = new Map(strategy.cumulative.map((p) => [p.year, p]));
+  for (const c of macroFilteredStrategy.cumulative) {
+    cumByYear.set(c.year, { ...(cumByYear.get(c.year) || { year: c.year }), cumulativeMacroFiltered: c.cumulativeMacroFiltered });
+  }
+  const mergedCumulative = [...cumByYear.values()].sort((a, b) => a.year - b.year);
+
+  const series = [
+    { key: "cumulativeStrategy", label: "Top quartile (signal only)", color: colors.primary },
+    { key: "cumulativeBenchmark", label: "Universe", color: colors.textMuted },
+    ...(strategy.sp500Available ? [{ key: "cumulativeSp500", label: "S&P 500", color: colors.warning }] : []),
+    { key: "cumulativeMacroFiltered", label: "Macro-filtered strategy", color: colors.success },
+  ];
+
+  const signalOnlyTotalReturn = strategy.cumulative.length
+    ? strategy.cumulative[strategy.cumulative.length - 1].cumulativeStrategy
+    : null;
+  const total = macroFilteredStrategy.agreementCount + macroFilteredStrategy.disagreementCount;
+
+  const rows = [
+    { key: "signal", label: "Top quartile (signal only)", stats: strategy.stats.strategy, totalReturn: signalOnlyTotalReturn },
+    { key: "macro", label: "Macro-filtered strategy", stats: macroFilteredStrategy.stats, totalReturn: macroFilteredStrategy.stats.totalReturn },
+  ];
+
+  return (
+    <div style={{ marginTop: 24, paddingTop: 20, borderTop: `1px solid ${colors.border}` }}>
+      <h4 style={{ margin: "0 0 8px 0", fontSize: 15 }}>Strategy performance — with macro filter</h4>
+      <p style={ui.cardSubtitle}>
+        Same setup as "Strategy performance" above, plus a variant that, every year, holds whichever asset "Which
+        asset does this regime favor?" picked instead of the raw signal's own pick — always deferring to the macro
+        read on disagreement (when they agree, it's the same holding either way, so those years are a no-op for the
+        comparison). {tickers.join(" and ")}'s raw signal and the macro filter <strong>agreed</strong> in{" "}
+        <strong>{macroFilteredStrategy.agreementCount}</strong> of {total} years and <strong>disagreed</strong> in the
+        other <strong>{macroFilteredStrategy.disagreementCount}</strong>.
+      </p>
+
+      <LineChart points={mergedCumulative} series={series} />
+
+      <div style={{ ...ui.tableScroll, marginTop: 12 }}>
+        <table style={ui.table}>
+          <thead>
+            <tr>
+              <th style={ui.th}>Series</th>
+              <th style={ui.th}>Annualized return (CAGR)</th>
+              <th style={ui.th}>Annualized volatility</th>
+              <th style={ui.th}>Maximum drawdown</th>
+              <th style={ui.th}>Total return</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key}>
+                <td style={ui.td}>{r.label}</td>
+                <td style={{ ...ui.td, color: r.stats.cagr >= 0 ? colors.success : colors.danger, fontWeight: 700 }}>
+                  {pct(r.stats.cagr)}
+                </td>
+                <td style={ui.td}>{pct(r.stats.volatility)}</td>
+                <td style={{ ...ui.td, color: colors.danger, fontWeight: 700 }}>{pct(r.stats.maxDrawdown)}</td>
+                <td style={{ ...ui.td, color: r.totalReturn >= 0 ? colors.success : colors.danger, fontWeight: 700 }}>
+                  {pct(r.totalReturn)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p style={{ ...ui.muted, marginTop: 8 }}>
+        Same historical-backtest caveat as everywhere else here: this compares two rules over the same {total} years
+        the macro split itself was found on — encouraging, not proof it will keep working.
+      </p>
     </div>
   );
 }

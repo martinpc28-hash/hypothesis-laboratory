@@ -269,6 +269,8 @@ public class SeasonalityService {
         Map<String, Object> edgeSplit = findEdgeSplit(rows);
         Map<String, Object> assetSplit = twoTickers ? findAssetSplit(rows, req.tickers) : null;
         Map<String, Object> liveRead = twoTickers ? buildLiveRead(req, closesByTicker, macroSeries, assetSplit) : null;
+        Map<String, Object> macroFilteredStrategy = assetSplit != null
+                ? buildMacroFilteredStrategy(req, assetSplit, rows, pointsByYear, closesByTicker) : null;
 
         Map<String, Object> result = new LinkedHashMap<>();
         Map<String, Object> meta = new LinkedHashMap<>();
@@ -284,7 +286,95 @@ public class SeasonalityService {
         result.put("edgeSplit", edgeSplit);
         result.put("assetSplit", assetSplit);
         result.put("liveRead", liveRead);
+        result.put("macroFilteredStrategy", macroFilteredStrategy);
         return result;
+    }
+
+    /** "What if, every year, you held whichever asset the macro split favored — always deferring
+     * to the macro read on disagreement, since when they agree it's a no-op anyway" — the same
+     * daily-compounding methodology (buildDailySeries) the main strategy backtest uses for
+     * volatility/drawdown, so this is directly comparable to the "Top quartile" line already
+     * shown above. Years the split can't evaluate (missing macro data for its feature) are
+     * skipped from this curve entirely, same convention as every other series on this page. */
+    private Map<String, Object> buildMacroFilteredStrategy(SeasonalityTestRequest req, Map<String, Object> assetSplit,
+                                                             List<YearlyMacroRow> rows, Map<Integer, List<Point>> pointsByYear,
+                                                             Map<String, NavigableMap<LocalDate, BigDecimal>> closesByTicker) {
+        String feature = (String) assetSplit.get("feature");
+        Map<Integer, YearlyMacroRow> rowsByYear = rows.stream().collect(Collectors.toMap(YearlyMacroRow::year, r -> r));
+
+        List<Integer> years = new ArrayList<>(rowsByYear.keySet());
+        years.sort(Comparator.naturalOrder());
+
+        List<Map<String, Object>> perYear = new ArrayList<>();
+        List<Map<String, Object>> cumulative = new ArrayList<>();
+        Map<Integer, List<String>> basketByYear = new LinkedHashMap<>();
+        int agreements = 0, disagreements = 0;
+        double cumProduct = 1.0;
+
+        for (int year : years) {
+            Double featureValue = macroFeatureValue(rowsByYear.get(year), feature);
+            String macroPick = macroPickFor(assetSplit, featureValue);
+            if (macroPick == null) continue; // can't evaluate the split this year — skip, don't guess
+
+            List<Point> yearPoints = pointsByYear.get(year);
+            Point chosen = yearPoints == null ? null
+                    : yearPoints.stream().filter(p -> p.ticker().equals(macroPick)).findFirst().orElse(null);
+            if (chosen == null || chosen.restValue() == null) continue;
+
+            String signalPick = yearPoints.stream().max(Comparator.comparingDouble(Point::signalValue)).map(Point::ticker).orElse(null);
+            boolean agree = macroPick.equals(signalPick);
+            if (agree) agreements++; else disagreements++;
+
+            cumProduct *= 1.0 + chosen.restValue();
+            basketByYear.put(year, List.of(macroPick));
+
+            Map<String, Object> yr = new LinkedHashMap<>();
+            yr.put("year", year);
+            yr.put("macroPick", macroPick);
+            yr.put("signalPick", signalPick);
+            yr.put("agree", agree);
+            yr.put("chosenReturn", chosen.restValue());
+            yr.put("chosenReturnAudit", auditMap(macroPick, chosen.rest()));
+            perYear.add(yr);
+
+            Map<String, Object> cum = new LinkedHashMap<>();
+            cum.put("year", year);
+            cum.put("cumulativeMacroFiltered", cumProduct - 1.0);
+            cumulative.add(cum);
+        }
+
+        if (basketByYear.isEmpty()) return null;
+
+        List<Integer> usableYears = new ArrayList<>(basketByYear.keySet());
+        usableYears.sort(Comparator.naturalOrder());
+        DailySeries daily = buildDailySeries(usableYears, basketByYear::get, closesByTicker, req.signalStartMonth, req.signalLengthMonths);
+
+        Map<String, Object> stats = new LinkedHashMap<>();
+        stats.put("cagr", Math.pow(cumProduct, 1.0 / usableYears.size()) - 1.0);
+        stats.put("volatility", daily.volatility());
+        stats.put("maxDrawdown", daily.maxDrawdown());
+        stats.put("totalReturn", cumProduct - 1.0);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("yearsUsed", usableYears.size());
+        result.put("agreementCount", agreements);
+        result.put("disagreementCount", disagreements);
+        result.put("perYear", perYear);
+        result.put("cumulative", cumulative);
+        result.put("stats", stats);
+        return result;
+    }
+
+    /** Same "which side of the split, which ticker does that side favor" logic the UI's
+     * AssetSplitCallout/macroPickFor use, just in Java — given a split map (as built by
+     * findAssetSplit) and this year's own reading for its feature, returns the favored ticker,
+     * or null if the reading itself is missing. */
+    private static String macroPickFor(Map<String, Object> assetSplit, Double featureValue) {
+        if (featureValue == null) return null;
+        double threshold = (Double) assetSplit.get("threshold");
+        boolean isBelow = featureValue <= threshold;
+        double tickerAShare = (Double) (isBelow ? assetSplit.get("tickerAShareBelow") : assetSplit.get("tickerAShareAbove"));
+        return tickerAShare >= 0.5 ? (String) assetSplit.get("tickerA") : (String) assetSplit.get("tickerB");
     }
 
     private record YearlyMacroRow(int year, double diff, Double winnerIndicator, MacroDataService.MacroSnapshot macro) {}
