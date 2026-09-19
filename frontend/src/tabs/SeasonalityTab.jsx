@@ -68,6 +68,7 @@ export default function SeasonalityTab({ setStatus }) {
   const [macroLoading, setMacroLoading] = useState(false);
   const [macroAudit, setMacroAudit] = useState(null);
   const [edgeAudit, setEdgeAudit] = useState(null);
+  const [macroPickReason, setMacroPickReason] = useState(null);
 
   // Combinatorial optimizer ("Monte Carlo" per the user's ask) — tries every valid
   // (universe, signal window) combination and ranks by risk-adjusted return. Always USD:
@@ -442,6 +443,7 @@ export default function SeasonalityTab({ setStatus }) {
           onRunMacroInsights={runMacroInsights}
           onMacroAudit={setMacroAudit}
           onEdgeAudit={setEdgeAudit}
+          onMacroPickReason={setMacroPickReason}
         />
       )}
       {sweepResult && <SweepResults result={sweepResult} />}
@@ -476,6 +478,7 @@ export default function SeasonalityTab({ setStatus }) {
       <AuditPanel audit={audit} onClose={() => setAudit(null)} />
       <MacroAuditDrawer detail={macroAudit} onClose={() => setMacroAudit(null)} />
       <EdgeAuditDrawer detail={edgeAudit} onClose={() => setEdgeAudit(null)} />
+      <MacroPickReasonDrawer detail={macroPickReason} onClose={() => setMacroPickReason(null)} onMacroAudit={setMacroAudit} />
     </div>
   );
 }
@@ -704,7 +707,7 @@ function DiffScoreRow({ perYear, diffKey, cumulative, strategyCumKey, benchmarkC
   );
 }
 
-function TestResults({ result, onAudit, macroResult, macroLoading, onRunMacroInsights, onMacroAudit, onEdgeAudit }) {
+function TestResults({ result, onAudit, macroResult, macroLoading, onRunMacroInsights, onMacroAudit, onEdgeAudit, onMacroPickReason }) {
   const { meta, panel, coverage, correlationVsRest, correlationVsFullYear, persistenceVsRest, persistenceVsFullYear, strategy } = result;
   const tickers = meta.tickers;
 
@@ -960,6 +963,7 @@ function TestResults({ result, onAudit, macroResult, macroLoading, onRunMacroIns
         onAudit={onAudit}
         onMacroAudit={onMacroAudit}
         onEdgeAudit={onEdgeAudit}
+        onMacroPickReason={onMacroPickReason}
       />
     </div>
   );
@@ -978,7 +982,7 @@ const MACRO_FEATURE_META = {
   vixAverage: { label: "VIX (average during the signal window)", format: (v) => v.toFixed(1) },
 };
 
-function MacroInsightsSection({ tickers, macroResult, macroLoading, onRun, onAudit, onMacroAudit, onEdgeAudit }) {
+function MacroInsightsSection({ tickers, macroResult, macroLoading, onRun, onAudit, onMacroAudit, onEdgeAudit, onMacroPickReason }) {
   return (
     <div style={ui.card}>
       <h3 style={ui.cardTitle}>Macro regime context</h3>
@@ -998,7 +1002,13 @@ function MacroInsightsSection({ tickers, macroResult, macroLoading, onRun, onAud
       )}
 
       {macroResult && (
-        <MacroInsightsResult result={macroResult} onAudit={onAudit} onMacroAudit={onMacroAudit} onEdgeAudit={onEdgeAudit} />
+        <MacroInsightsResult
+          result={macroResult}
+          onAudit={onAudit}
+          onMacroAudit={onMacroAudit}
+          onEdgeAudit={onEdgeAudit}
+          onMacroPickReason={onMacroPickReason}
+        />
       )}
     </div>
   );
@@ -1032,7 +1042,7 @@ function macroPickFor(row, assetSplit) {
   return tickerAShare >= 0.5 ? assetSplit.tickerA : assetSplit.tickerB;
 }
 
-function MacroInsightsResult({ result, onAudit, onMacroAudit, onEdgeAudit }) {
+function MacroInsightsResult({ result, onAudit, onMacroAudit, onEdgeAudit, onMacroPickReason }) {
   const { meta, yearly, edgeSplit, assetSplit, liveRead } = result;
   const byKey = (row, feature) => (row.macroAudit ? row.macroAudit[feature] : null);
   const showAssetCols = meta.tickers.length === 2;
@@ -1135,7 +1145,33 @@ function MacroInsightsResult({ result, onAudit, onMacroAudit, onEdgeAudit }) {
                 <td style={ui.td}>{r.hit ? "✓" : "✕"}</td>
                 {showAssetCols && <td style={ui.td}>{r.winner ?? "—"}</td>}
                 {showAssetCols && assetSplit && (
-                  <td style={{ ...ui.td, color: macroAgrees === null ? colors.textMuted : macroAgrees ? colors.success : colors.danger }}>
+                  <td
+                    style={{
+                      ...ui.td,
+                      ...(macroPick ? auditableCell : null),
+                      color: macroAgrees === null ? colors.textMuted : macroAgrees ? colors.success : colors.danger,
+                    }}
+                    title={macroPick ? "Click to see why this asset was picked" : undefined}
+                    onClick={
+                      macroPick
+                        ? () =>
+                            onMacroPickReason({
+                              year: r.year,
+                              feature: assetSplit.feature,
+                              value: r[assetSplit.feature],
+                              threshold: assetSplit.threshold,
+                              tickerA: assetSplit.tickerA,
+                              tickerB: assetSplit.tickerB,
+                              tickerAShareBelow: assetSplit.tickerAShareBelow,
+                              tickerAShareAbove: assetSplit.tickerAShareAbove,
+                              nBelow: assetSplit.nBelow,
+                              nAbove: assetSplit.nAbove,
+                              pick: macroPick,
+                              entry: byKey(r, assetSplit.feature),
+                            })
+                        : undefined
+                    }
+                  >
                     {macroPick ?? "—"}
                   </td>
                 )}
@@ -1450,6 +1486,48 @@ function EdgeAuditDrawer({ detail, onClose }) {
         }}
       >
         Edge = {pct(strategyAvg)} − {pct(benchmarkAvg)} = {pct(diff)}
+      </div>
+    </Drawer>
+  );
+}
+
+// Explains one year's "Macro pick" cell: which side of the historical split that year's own
+// reading falls on, what that side has favored historically, and a link to audit the reading
+// itself — the same split shown in AssetSplitCallout, just applied to THIS year specifically.
+function MacroPickReasonDrawer({ detail, onClose, onMacroAudit }) {
+  if (!detail) return null;
+  const meta = MACRO_FEATURE_META[detail.feature] || { label: detail.feature, format: (v) => v };
+  const isBelow = detail.value <= detail.threshold;
+  const belowFavors = detail.tickerAShareBelow >= 0.5 ? detail.tickerA : detail.tickerB;
+  const belowShare = detail.tickerAShareBelow >= 0.5 ? detail.tickerAShareBelow : 1 - detail.tickerAShareBelow;
+  const aboveFavors = detail.tickerAShareAbove >= 0.5 ? detail.tickerA : detail.tickerB;
+  const aboveShare = detail.tickerAShareAbove >= 0.5 ? detail.tickerAShareAbove : 1 - detail.tickerAShareAbove;
+  const thisSideFavors = isBelow ? belowFavors : aboveFavors;
+  const thisSideShare = isBelow ? belowShare : aboveShare;
+  const thisSideN = isBelow ? detail.nBelow : detail.nAbove;
+
+  return (
+    <Drawer kicker="Macro pick reasoning" title={`${detail.pick} · ${detail.year}`} subtitle={`Based on ${meta.label}`} onClose={onClose}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, fontSize: 13.5 }}>
+        <div
+          style={{ ...(detail.entry ? auditableCell : null), fontSize: 15, fontWeight: 700 }}
+          title={detail.entry ? "Click to see where this number comes from" : undefined}
+          onClick={detail.entry ? () => onMacroAudit({ featureLabel: meta.label, entry: detail.entry }) : undefined}
+        >
+          This year's reading: {meta.format(detail.value)}
+        </div>
+
+        <p style={{ margin: 0 }}>
+          {detail.year} falls <strong>{isBelow ? "below" : "above"}</strong> the historical split at{" "}
+          <strong>{meta.format(detail.threshold)}</strong>, and in that group <strong>{thisSideFavors}</strong> led in{" "}
+          <strong style={{ color: colors.success }}>{pct(thisSideShare, 0)}</strong> of {thisSideN} comparable years —
+          that's why <strong>{detail.pick}</strong> is the pick for this year.
+        </p>
+
+        <div style={{ paddingTop: 10, borderTop: `1px dashed ${colors.border}`, fontSize: 12.5, color: colors.textMuted }}>
+          Full split, for reference: below {meta.format(detail.threshold)} → {belowFavors} led {pct(belowShare, 0)} of{" "}
+          {detail.nBelow} years. Above it → {aboveFavors} led {pct(aboveShare, 0)} of {detail.nAbove} years.
+        </div>
       </div>
     </Drawer>
   );
