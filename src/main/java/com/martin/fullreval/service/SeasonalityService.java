@@ -180,11 +180,19 @@ public class SeasonalityService {
      * period speaks for every year alike. With as few as ~15-25 yearly observations, this
      * deliberately stays a single best-separating split (a one-level decision tree, sometimes
      * called a "stump") rather than a multi-feature model — anything with more free parameters
-     * than that would be fitting noise, not signal, on a sample this small. */
+     * than that would be fitting noise, not signal, on a sample this small.
+     *
+     * For exactly two tickers (the common "should I be in A or B" case) it goes one step further:
+     * finds the macro split that best predicts WHICH of the two actually led each year (not just
+     * whether trusting the signal paid off that year), then applies it to the CURRENT year's own
+     * already-completed signal window for a live "macro conditions currently favor X" read —
+     * cross-checked against whatever the raw signal itself picked that year, so a disagreement
+     * between the two is exactly the kind of false-positive flag the UI asks for. */
     public Map<String, Object> runMacroInsights(SeasonalityTestRequest req) {
         validateWindow(req.signalStartMonth, req.signalLengthMonths);
         MarketDataSource source = sourceRegistry.get(req.dataSource);
         Map<String, NavigableMap<LocalDate, BigDecimal>> closesByTicker = fetchAllCloses(source, req.tickers, req.currencyMode);
+        boolean twoTickers = req.tickers.size() == 2;
 
         List<Point> allPoints = new ArrayList<>();
         for (String ticker : req.tickers) {
@@ -196,39 +204,62 @@ public class SeasonalityService {
         Map<Integer, Long> assetCountByYear = allPoints.stream()
                 .filter(Point::coveredForStats)
                 .collect(Collectors.groupingBy(Point::year, Collectors.counting()));
-        List<Point> statsPoints = allPoints.stream()
+        Map<Integer, List<Point>> pointsByYear = allPoints.stream()
                 .filter(Point::coveredForStats)
                 .filter(p -> assetCountByYear.getOrDefault(p.year(), 0L) >= req.minAssetsPerYear)
-                .toList();
-
-        Map<Integer, Double> diffByYear = perYearDiff(statsPoints);
+                .filter(p -> p.restValue() != null)
+                .collect(Collectors.groupingBy(Point::year));
 
         MacroDataService.MacroSeriesData macroSeries = macroDataService.fetchAll();
         List<Map<String, Object>> yearly = new ArrayList<>();
         List<YearlyMacroRow> rows = new ArrayList<>();
-        for (Map.Entry<Integer, Double> e : diffByYear.entrySet()) {
+        for (Map.Entry<Integer, List<Point>> e : new TreeMap<>(pointsByYear).entrySet()) {
             int year = e.getKey();
-            double diff = e.getValue();
+            List<Point> yearPoints = e.getValue();
+            if (yearPoints.size() < 2) continue; // need at least 2 to have a "top" and a "rest"
+
+            int quartileSize = (int) Math.ceil(yearPoints.size() / 4.0);
+            List<Point> topQuartile = yearPoints.stream()
+                    .sorted(Comparator.comparingDouble(Point::signalValue).reversed())
+                    .limit(quartileSize)
+                    .toList();
+            double strategyReturn = topQuartile.stream().mapToDouble(Point::restValue).average().orElse(0);
+            double benchmarkReturn = yearPoints.stream().mapToDouble(Point::restValue).average().orElse(0);
+            double diff = strategyReturn - benchmarkReturn;
+
+            // Who actually led that year (by real outcome, not by the signal's pick) — the target
+            // the asset-recommendation split below tries to predict from macro conditions alone.
+            Point actualWinner = yearPoints.stream().max(Comparator.comparingDouble(Point::restValue)).orElse(null);
+            Double winnerIndicator = (twoTickers && actualWinner != null)
+                    ? (actualWinner.ticker().equals(req.tickers.get(0)) ? 1.0 : 0.0) : null;
+
             LocalDate windowStart = LocalDate.of(year, req.signalStartMonth, 1);
             LocalDate windowEnd = windowStart.plusMonths(req.signalLengthMonths).minusDays(1);
-            MacroDataService.MacroSnapshot snap = macroDataService.snapshotFor(macroSeries, windowStart, windowEnd);
+            MacroDataService.MacroSnapshotAudit audit = macroDataService.auditFor(macroSeries, windowStart, windowEnd);
+            MacroDataService.MacroSnapshot snap = new MacroDataService.MacroSnapshot(
+                    audit.inflationYoY().value(), audit.growthYoY().value(), audit.rateLevel().value(),
+                    audit.rateChangeYoY().value(), audit.yieldCurveSlope().value(), audit.vixAverage().value());
 
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("year", year);
             row.put("diff", diff);
             row.put("hit", diff >= 0);
+            if (twoTickers) row.put("winner", actualWinner == null ? null : actualWinner.ticker());
             row.put("inflationYoY", snap.inflationYoY());
             row.put("growthYoY", snap.growthYoY());
             row.put("rateLevel", snap.rateLevel());
             row.put("rateChangeYoY", snap.rateChangeYoY());
             row.put("yieldCurveSlope", snap.yieldCurveSlope());
             row.put("vixAverage", snap.vixAverage());
+            row.put("macroAudit", auditToMap(audit));
             yearly.add(row);
 
-            rows.add(new YearlyMacroRow(year, diff, snap));
+            rows.add(new YearlyMacroRow(year, diff, winnerIndicator, snap));
         }
-        yearly.sort(Comparator.comparing(m -> (Integer) m.get("year")));
-        rows.sort(Comparator.comparingInt(YearlyMacroRow::year));
+
+        Map<String, Object> edgeSplit = findEdgeSplit(rows);
+        Map<String, Object> assetSplit = twoTickers ? findAssetSplit(rows, req.tickers) : null;
+        Map<String, Object> liveRead = twoTickers ? buildLiveRead(req, closesByTicker, macroSeries, assetSplit) : null;
 
         Map<String, Object> result = new LinkedHashMap<>();
         Map<String, Object> meta = new LinkedHashMap<>();
@@ -241,35 +272,13 @@ public class SeasonalityService {
         meta.put("yearsUsed", yearly.size());
         result.put("meta", meta);
         result.put("yearly", yearly);
-        result.put("bestSplit", findBestMacroSplit(rows));
+        result.put("edgeSplit", edgeSplit);
+        result.put("assetSplit", assetSplit);
+        result.put("liveRead", liveRead);
         return result;
     }
 
-    /** Per-year edge of the signal-window top quartile over the whole covered subset that same
-     * year — the same "strategyReturn minus benchmarkReturn" the main strategy backtest table
-     * shows, just without everything else strategyBacktest also computes (SPY/URTH reference
-     * lines, the daily wealth curve for volatility/drawdown) that this analysis doesn't need. */
-    private Map<Integer, Double> perYearDiff(List<Point> points) {
-        Map<Integer, List<Point>> byYear = points.stream()
-                .filter(p -> p.restValue() != null)
-                .collect(Collectors.groupingBy(Point::year));
-        Map<Integer, Double> diffs = new TreeMap<>();
-        for (Map.Entry<Integer, List<Point>> e : byYear.entrySet()) {
-            List<Point> yearPoints = e.getValue();
-            if (yearPoints.size() < 2) continue; // need at least 2 to have a "top" and a "rest"
-            int quartileSize = (int) Math.ceil(yearPoints.size() / 4.0);
-            List<Point> topQuartile = yearPoints.stream()
-                    .sorted(Comparator.comparingDouble(Point::signalValue).reversed())
-                    .limit(quartileSize)
-                    .toList();
-            double strategyReturn = topQuartile.stream().mapToDouble(Point::restValue).average().orElse(0);
-            double benchmarkReturn = yearPoints.stream().mapToDouble(Point::restValue).average().orElse(0);
-            diffs.put(e.getKey(), strategyReturn - benchmarkReturn);
-        }
-        return diffs;
-    }
-
-    private record YearlyMacroRow(int year, double diff, MacroDataService.MacroSnapshot macro) {}
+    private record YearlyMacroRow(int year, double diff, Double winnerIndicator, MacroDataService.MacroSnapshot macro) {}
 
     private static Double macroFeatureValue(YearlyMacroRow row, String feature) {
         return switch (feature) {
@@ -283,65 +292,206 @@ public class SeasonalityService {
         };
     }
 
-    /** Finds the single macro feature + threshold that most cleanly separates this combo's
-     * per-year edge into a "works well" group and a "doesn't" group — a one-level regression
-     * tree (CART-style: pick the split that most reduces total squared error around each group's
-     * own mean), not a multi-variable model, because a handful of macro features over ~15-25
-     * yearly observations is nowhere near enough data to fit anything more complex without just
-     * memorizing noise. Requires at least minLeaf years on EACH side of a candidate split, so it
-     * can't "find a pattern" by isolating a single extreme year. Returns null (surfaced to the
-     * UI as "no split found") if there isn't enough data for even one valid split. */
-    private Map<String, Object> findBestMacroSplit(List<YearlyMacroRow> rows) {
+    private static Double macroFeatureValueFromAudit(MacroDataService.MacroSnapshotAudit audit, String feature) {
+        return switch (feature) {
+            case "inflationYoY" -> audit.inflationYoY().value();
+            case "growthYoY" -> audit.growthYoY().value();
+            case "rateLevel" -> audit.rateLevel().value();
+            case "rateChangeYoY" -> audit.rateChangeYoY().value();
+            case "yieldCurveSlope" -> audit.yieldCurveSlope().value();
+            case "vixAverage" -> audit.vixAverage().value();
+            default -> null;
+        };
+    }
+
+    private record SplitCandidate(String feature, double threshold, int nBelow, int nAbove,
+                                   double meanBelow, double meanAbove, double varianceReduction) {}
+
+    /** Core one-level regression-tree split search shared by the "does the edge hold up" and
+     * "which asset does the regime favor" analyses — CART-style: for every macro feature and
+     * every candidate threshold, picks whichever split most reduces total squared error of
+     * `targetFn` around each side's own mean, not a multi-variable model, because a handful of
+     * macro features over ~15-25 yearly observations is nowhere near enough data to fit anything
+     * more complex without just memorizing noise. Requires at least minLeaf years on EACH side of
+     * a candidate split, so it can't "find a pattern" by isolating a single extreme year. Returns
+     * null if there isn't enough data for even one valid split. */
+    private SplitCandidate bestSplit(List<YearlyMacroRow> rows, java.util.function.Function<YearlyMacroRow, Double> targetFn) {
         int totalYears = rows.size();
         int minLeaf = Math.max(3, totalYears / 5);
+        record Pair(double value, double target) {}
 
-        record Pair(double value, double diff) {}
-        record Candidate(String feature, double threshold, int nBelow, int nAbove,
-                          double meanDiffBelow, double meanDiffAbove,
-                          double hitRateBelow, double hitRateAbove, double varianceReduction) {}
-
-        Candidate best = null;
+        SplitCandidate best = null;
         for (String feature : MACRO_FEATURES) {
             List<Pair> pairs = new ArrayList<>();
             for (YearlyMacroRow row : rows) {
-                Double v = macroFeatureValue(row, feature);
-                if (v != null) pairs.add(new Pair(v, row.diff()));
+                Double fv = macroFeatureValue(row, feature);
+                Double tv = targetFn.apply(row);
+                if (fv != null && tv != null) pairs.add(new Pair(fv, tv));
             }
             if (pairs.size() < 2 * minLeaf) continue; // not enough non-null years for this feature
             pairs.sort(Comparator.comparingDouble(Pair::value));
 
-            double totalMean = pairs.stream().mapToDouble(Pair::diff).average().orElse(0);
-            double baselineSse = pairs.stream().mapToDouble(p -> Math.pow(p.diff() - totalMean, 2)).sum();
+            double totalMean = pairs.stream().mapToDouble(Pair::target).average().orElse(0);
+            double baselineSse = pairs.stream().mapToDouble(p -> Math.pow(p.target() - totalMean, 2)).sum();
 
             for (int i = minLeaf; i <= pairs.size() - minLeaf; i++) {
                 if (pairs.get(i - 1).value() == pairs.get(i).value()) continue; // tie — not a valid boundary
                 double threshold = (pairs.get(i - 1).value() + pairs.get(i).value()) / 2.0;
                 List<Pair> below = pairs.subList(0, i);
                 List<Pair> above = pairs.subList(i, pairs.size());
-                double meanBelow = below.stream().mapToDouble(Pair::diff).average().orElse(0);
-                double meanAbove = above.stream().mapToDouble(Pair::diff).average().orElse(0);
-                double sse = below.stream().mapToDouble(p -> Math.pow(p.diff() - meanBelow, 2)).sum()
-                        + above.stream().mapToDouble(p -> Math.pow(p.diff() - meanAbove, 2)).sum();
+                double meanBelow = below.stream().mapToDouble(Pair::target).average().orElse(0);
+                double meanAbove = above.stream().mapToDouble(Pair::target).average().orElse(0);
+                double sse = below.stream().mapToDouble(p -> Math.pow(p.target() - meanBelow, 2)).sum()
+                        + above.stream().mapToDouble(p -> Math.pow(p.target() - meanAbove, 2)).sum();
                 double reduction = baselineSse - sse;
                 if (best == null || reduction > best.varianceReduction()) {
-                    long hitsBelow = below.stream().filter(p -> p.diff() >= 0).count();
-                    long hitsAbove = above.stream().filter(p -> p.diff() >= 0).count();
-                    best = new Candidate(feature, threshold, below.size(), above.size(), meanBelow, meanAbove,
-                            (double) hitsBelow / below.size(), (double) hitsAbove / above.size(), reduction);
+                    best = new SplitCandidate(feature, threshold, below.size(), above.size(), meanBelow, meanAbove, reduction);
                 }
             }
         }
+        return best;
+    }
 
+    /** Finds the single macro feature + threshold that most cleanly separates this combo's
+     * per-year edge into a "works well" group and a "doesn't" group. Returns null (surfaced to
+     * the UI as "no split found") if there isn't enough data for even one valid split. */
+    private Map<String, Object> findEdgeSplit(List<YearlyMacroRow> rows) {
+        SplitCandidate best = bestSplit(rows, YearlyMacroRow::diff);
+        if (best == null) return null;
+        double hitRateBelow = rows.stream()
+                .filter(r -> { Double v = macroFeatureValue(r, best.feature()); return v != null && v <= best.threshold(); })
+                .mapToDouble(r -> r.diff() >= 0 ? 1.0 : 0.0).average().orElse(0);
+        double hitRateAbove = rows.stream()
+                .filter(r -> { Double v = macroFeatureValue(r, best.feature()); return v != null && v > best.threshold(); })
+                .mapToDouble(r -> r.diff() >= 0 ? 1.0 : 0.0).average().orElse(0);
+
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("feature", best.feature());
+        m.put("threshold", best.threshold());
+        m.put("nBelow", best.nBelow());
+        m.put("nAbove", best.nAbove());
+        m.put("meanDiffBelow", best.meanBelow());
+        m.put("meanDiffAbove", best.meanAbove());
+        m.put("hitRateBelow", hitRateBelow);
+        m.put("hitRateAbove", hitRateAbove);
+        return m;
+    }
+
+    /** Only meaningful for exactly two tickers: finds the macro split that best predicts which of
+     * the two actually led the rest of the year — a direct "macro conditions favor A vs. B"
+     * recommendation, instead of just validating whether the signal-following strategy works. */
+    private Map<String, Object> findAssetSplit(List<YearlyMacroRow> rows, List<String> tickers) {
+        if (tickers.size() != 2) return null;
+        SplitCandidate best = bestSplit(rows, YearlyMacroRow::winnerIndicator);
         if (best == null) return null;
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("feature", best.feature());
         m.put("threshold", best.threshold());
         m.put("nBelow", best.nBelow());
         m.put("nAbove", best.nAbove());
-        m.put("meanDiffBelow", best.meanDiffBelow());
-        m.put("meanDiffAbove", best.meanDiffAbove());
-        m.put("hitRateBelow", best.hitRateBelow());
-        m.put("hitRateAbove", best.hitRateAbove());
+        m.put("tickerA", tickers.get(0));
+        m.put("tickerB", tickers.get(1));
+        m.put("tickerAShareBelow", best.meanBelow());
+        m.put("tickerAShareAbove", best.meanAbove());
+        return m;
+    }
+
+    /** For a 2-ticker combo whose current-year signal window has already fully elapsed, reads the
+     * macro backdrop as of that window's end, applies the asset split found above to it, and
+     * compares the result against whatever the raw signal itself picked that year — a mismatch is
+     * exactly the "seasonal pattern says one thing, macro context says another" false-positive
+     * flag the UI asks for. Also reports real performance since the signal window ended, through
+     * today (not a full rest-of-year return yet, since the year isn't over). Returns null if this
+     * year's window hasn't finished yet. */
+    private Map<String, Object> buildLiveRead(SeasonalityTestRequest req, Map<String, NavigableMap<LocalDate, BigDecimal>> closesByTicker,
+                                               MacroDataService.MacroSeriesData macroSeries, Map<String, Object> assetSplit) {
+        int currentYear = LocalDate.now().getYear();
+        LocalDate windowStart = LocalDate.of(currentYear, req.signalStartMonth, 1);
+        LocalDate windowEnd = windowStart.plusMonths(req.signalLengthMonths).minusDays(1);
+        LocalDate today = LocalDate.now();
+        if (windowEnd.isAfter(today)) return null; // this year's signal window hasn't finished yet
+
+        String tickerA = req.tickers.get(0);
+        String tickerB = req.tickers.get(1);
+        Point pointA = computePoint(tickerA, currentYear, closesByTicker.get(tickerA), req.signalStartMonth, req.signalLengthMonths);
+        Point pointB = computePoint(tickerB, currentYear, closesByTicker.get(tickerB), req.signalStartMonth, req.signalLengthMonths);
+
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("year", currentYear);
+        m.put("windowStart", windowStart.toString());
+        m.put("windowEnd", windowEnd.toString());
+        m.put("asOfDate", today.toString());
+        m.put("tickerA", tickerA);
+        m.put("tickerB", tickerB);
+
+        String signalPick = null;
+        if (pointA.signalValue() != null && pointB.signalValue() != null) {
+            signalPick = pointA.signalValue() >= pointB.signalValue() ? tickerA : tickerB;
+        }
+        m.put("signalPick", signalPick);
+        m.put("signalReturnA", pointA.signalValue());
+        m.put("signalReturnB", pointB.signalValue());
+        m.put("signalAuditA", auditMap(tickerA, pointA.signal()));
+        m.put("signalAuditB", auditMap(tickerB, pointB.signal()));
+
+        LocalDate holdStart = windowEnd.plusDays(1);
+        if (!holdStart.isAfter(today)) {
+            ReturnCalc sinceA = computeReturnCalc(closesByTicker.get(tickerA), holdStart, today);
+            ReturnCalc sinceB = computeReturnCalc(closesByTicker.get(tickerB), holdStart, today);
+            m.put("sinceSignalReturnA", sinceA.value());
+            m.put("sinceSignalReturnB", sinceB.value());
+            m.put("sinceSignalAuditA", auditMap(tickerA, sinceA));
+            m.put("sinceSignalAuditB", auditMap(tickerB, sinceB));
+        }
+
+        if (assetSplit != null) {
+            String feature = (String) assetSplit.get("feature");
+            double threshold = (Double) assetSplit.get("threshold");
+            MacroDataService.MacroSnapshotAudit audit = macroDataService.auditFor(macroSeries, windowStart, windowEnd);
+            Double currentValue = macroFeatureValueFromAudit(audit, feature);
+            m.put("macroAudit", auditToMap(audit));
+            if (currentValue != null) {
+                boolean isBelow = currentValue <= threshold;
+                double tickerAShare = (Double) (isBelow ? assetSplit.get("tickerAShareBelow") : assetSplit.get("tickerAShareAbove"));
+                String favored = tickerAShare >= 0.5 ? tickerA : tickerB;
+                double historicalWinShare = tickerAShare >= 0.5 ? tickerAShare : 1.0 - tickerAShare;
+                m.put("macroFeature", feature);
+                m.put("macroValue", currentValue);
+                m.put("macroThreshold", threshold);
+                m.put("macroSide", isBelow ? "below" : "above");
+                m.put("macroPick", favored);
+                m.put("macroHistoricalWinShare", historicalWinShare);
+                m.put("agreesWithSignal", signalPick != null && signalPick.equals(favored));
+            }
+        }
+        return m;
+    }
+
+    private Map<String, Object> auditToMap(MacroDataService.MacroSnapshotAudit audit) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("inflationYoY", featureAuditToMap(audit.inflationYoY()));
+        m.put("growthYoY", featureAuditToMap(audit.growthYoY()));
+        m.put("rateLevel", featureAuditToMap(audit.rateLevel()));
+        m.put("rateChangeYoY", featureAuditToMap(audit.rateChangeYoY()));
+        m.put("yieldCurveSlope", featureAuditToMap(audit.yieldCurveSlope()));
+        m.put("vixAverage", featureAuditToMap(audit.vixAverage()));
+        return m;
+    }
+
+    private Map<String, Object> featureAuditToMap(MacroDataService.FeatureAudit a) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("seriesId", a.seriesId());
+        m.put("seriesName", a.seriesName());
+        m.put("requestedAsOf", a.requestedAsOf() == null ? null : a.requestedAsOf().toString());
+        m.put("windowStart", a.windowStart() == null ? null : a.windowStart().toString());
+        m.put("windowEnd", a.windowEnd() == null ? null : a.windowEnd().toString());
+        m.put("asOfDate", a.asOfDate() == null ? null : a.asOfDate().toString());
+        m.put("asOfValue", a.asOfValue());
+        m.put("priorDate", a.priorDate() == null ? null : a.priorDate().toString());
+        m.put("priorValue", a.priorValue());
+        m.put("observationCount", a.observationCount());
+        m.put("value", a.value());
+        m.put("formula", a.formula());
         return m;
     }
 

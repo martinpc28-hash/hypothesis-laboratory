@@ -66,6 +66,7 @@ export default function SeasonalityTab({ setStatus }) {
   // down the main test's own auto-run.
   const [macroResult, setMacroResult] = useState(null);
   const [macroLoading, setMacroLoading] = useState(false);
+  const [macroAudit, setMacroAudit] = useState(null);
 
   // Combinatorial optimizer ("Monte Carlo" per the user's ask) — tries every valid
   // (universe, signal window) combination and ranks by risk-adjusted return. Always USD:
@@ -438,6 +439,7 @@ export default function SeasonalityTab({ setStatus }) {
           macroResult={macroResult}
           macroLoading={macroLoading}
           onRunMacroInsights={runMacroInsights}
+          onMacroAudit={setMacroAudit}
         />
       )}
       {sweepResult && <SweepResults result={sweepResult} />}
@@ -470,6 +472,7 @@ export default function SeasonalityTab({ setStatus }) {
       />
 
       <AuditPanel audit={audit} onClose={() => setAudit(null)} />
+      <MacroAuditDrawer detail={macroAudit} onClose={() => setMacroAudit(null)} />
     </div>
   );
 }
@@ -698,7 +701,7 @@ function DiffScoreRow({ perYear, diffKey, cumulative, strategyCumKey, benchmarkC
   );
 }
 
-function TestResults({ result, onAudit, macroResult, macroLoading, onRunMacroInsights }) {
+function TestResults({ result, onAudit, macroResult, macroLoading, onRunMacroInsights, onMacroAudit }) {
   const { meta, panel, coverage, correlationVsRest, correlationVsFullYear, persistenceVsRest, persistenceVsFullYear, strategy } = result;
   const tickers = meta.tickers;
 
@@ -951,6 +954,8 @@ function TestResults({ result, onAudit, macroResult, macroLoading, onRunMacroIns
         macroResult={macroResult}
         macroLoading={macroLoading}
         onRun={onRunMacroInsights}
+        onAudit={onAudit}
+        onMacroAudit={onMacroAudit}
       />
     </div>
   );
@@ -969,11 +974,7 @@ const MACRO_FEATURE_META = {
   vixAverage: { label: "VIX (average during the signal window)", format: (v) => v.toFixed(1) },
 };
 
-function macroCell(value) {
-  return value === null || value === undefined ? "—" : value;
-}
-
-function MacroInsightsSection({ tickers, macroResult, macroLoading, onRun }) {
+function MacroInsightsSection({ tickers, macroResult, macroLoading, onRun, onAudit, onMacroAudit }) {
   return (
     <div style={ui.card}>
       <h3 style={ui.cardTitle}>Macro regime context</h3>
@@ -983,7 +984,7 @@ function MacroInsightsSection({ tickers, macroResult, macroLoading, onRun }) {
         yield, the 10Y-2Y yield curve slope, and the VIX from FRED for each year — all "as of" the moment the signal
         window ends, never later, so nothing here could have leaked into a real decision after the fact — then
         searches for the single macro reading that best separates the years this combo worked from the years it
-        didn't.
+        didn't. Click any macro number to see exactly where it comes from and what time span it covers.
       </p>
 
       {!macroResult && (
@@ -992,13 +993,29 @@ function MacroInsightsSection({ tickers, macroResult, macroLoading, onRun }) {
         </button>
       )}
 
-      {macroResult && <MacroInsightsResult result={macroResult} />}
+      {macroResult && <MacroInsightsResult result={macroResult} onAudit={onAudit} onMacroAudit={onMacroAudit} />}
     </div>
   );
 }
 
-function MacroInsightsResult({ result }) {
-  const { meta, yearly, bestSplit } = result;
+// Small clickable number with the same "auditable" dotted underline used elsewhere — opens the
+// macro audit drawer for one feature reading instead of the return-audit one.
+function MacroValue({ value, entry, format, onMacroAudit, featureLabel }) {
+  if (value === null || value === undefined) return <span>—</span>;
+  return (
+    <span
+      style={auditableCell}
+      title="Click to see where this number comes from"
+      onClick={() => entry && onMacroAudit({ featureLabel, entry })}
+    >
+      {format(value)}
+    </span>
+  );
+}
+
+function MacroInsightsResult({ result, onAudit, onMacroAudit }) {
+  const { meta, yearly, edgeSplit, assetSplit, liveRead } = result;
+  const byKey = (row, feature) => (row.macroAudit ? row.macroAudit[feature] : null);
 
   return (
     <div>
@@ -1006,10 +1023,21 @@ function MacroInsightsResult({ result }) {
         {meta.source} · {meta.yearFrom}–{meta.yearTo} · {meta.yearsUsed} years with data
       </p>
 
-      {bestSplit ? (
+      {liveRead && <LiveReadCallout liveRead={liveRead} onAudit={onAudit} onMacroAudit={onMacroAudit} />}
+
+      {assetSplit ? (
+        <AssetSplitCallout assetSplit={assetSplit} yearsUsed={meta.yearsUsed} />
+      ) : meta.tickers.length === 2 ? (
+        <p style={{ ...ui.muted, marginTop: 8 }}>
+          No macro feature separated the years {meta.tickers[0]} led from the years {meta.tickers[1]} led by enough
+          margin — no asset recommendation shown, on purpose, rather than forcing one that isn't real.
+        </p>
+      ) : null}
+
+      {edgeSplit ? (
         <div
           style={{
-            background: colors.primarySoft,
+            background: colors.surfaceAlt,
             border: `1px solid ${colors.border}`,
             borderRadius: 10,
             padding: 16,
@@ -1017,31 +1045,31 @@ function MacroInsightsResult({ result }) {
             marginBottom: 16,
           }}
         >
-          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, color: colors.primary }}>
-            Best-separating macro split
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, color: colors.textMuted }}>
+            Does trusting the signal even help? (separate from which asset to hold)
           </div>
           <p style={{ margin: "6px 0 12px 0", fontSize: 14 }}>
-            When <strong>{MACRO_FEATURE_META[bestSplit.feature]?.label || bestSplit.feature}</strong> was{" "}
-            <strong>below {MACRO_FEATURE_META[bestSplit.feature]?.format(bestSplit.threshold) ?? bestSplit.threshold}</strong>,
-            this combo's edge worked in <strong style={{ color: colors.success }}>{pct(bestSplit.hitRateBelow, 0)}</strong> of{" "}
-            {bestSplit.nBelow} years (avg edge {pct(bestSplit.meanDiffBelow)}). Above that threshold, it worked in{" "}
-            <strong style={{ color: bestSplit.hitRateAbove >= 0.5 ? colors.success : colors.danger }}>
-              {pct(bestSplit.hitRateAbove, 0)}
+            When <strong>{MACRO_FEATURE_META[edgeSplit.feature]?.label || edgeSplit.feature}</strong> was{" "}
+            <strong>below {MACRO_FEATURE_META[edgeSplit.feature]?.format(edgeSplit.threshold) ?? edgeSplit.threshold}</strong>,
+            buying the signal's pick beat the group average in{" "}
+            <strong style={{ color: colors.success }}>{pct(edgeSplit.hitRateBelow, 0)}</strong> of {edgeSplit.nBelow} years
+            (avg edge {pct(edgeSplit.meanDiffBelow)}). Above that threshold, it worked in{" "}
+            <strong style={{ color: edgeSplit.hitRateAbove >= 0.5 ? colors.success : colors.danger }}>
+              {pct(edgeSplit.hitRateAbove, 0)}
             </strong>{" "}
-            of {bestSplit.nAbove} years (avg edge {pct(bestSplit.meanDiffAbove)}).
+            of {edgeSplit.nAbove} years (avg edge {pct(edgeSplit.meanDiffAbove)}).
           </p>
           <p style={{ ...ui.muted, margin: 0 }}>
-            This is the single best split out of 6 macro features tested — a one-level decision tree (a "stump"),
-            deliberately kept this simple because {meta.yearsUsed} yearly observations isn't enough data to trust
-            anything with more moving parts. Treat this as a hypothesis worth watching going forward, not a
-            statistically proven rule — it was found by looking at the same years it's being reported on, so some of
-            this apparent pattern is expected to be noise even if the underlying effect is real.
+            One of 6 macro features tested, kept to a single split (a one-level decision tree, or "stump") because{" "}
+            {meta.yearsUsed} yearly observations isn't enough data to trust anything with more moving parts. A
+            hypothesis to watch, not a proven rule — found by looking at the same years it's reported on, so some of
+            this is expected to be noise even if the underlying effect is real.
           </p>
         </div>
       ) : (
         <p style={{ ...ui.muted, marginTop: 8 }}>
-          No macro feature separated the good years from the bad years by enough margin (or a group would have needed
-          fewer years than a sane minimum) — no split shown, on purpose, rather than forcing one that isn't real.
+          No macro feature separated the good years from the bad years by enough margin — no split shown, on purpose,
+          rather than forcing one that isn't real.
         </p>
       )}
 
@@ -1052,6 +1080,7 @@ function MacroInsightsResult({ result }) {
               <th style={ui.th}>Year</th>
               <th style={ui.th}>Edge</th>
               <th style={ui.th}>Hit</th>
+              {meta.tickers.length === 2 && <th style={ui.th}>Winner</th>}
               <th style={ui.th}>Inflation (YoY)</th>
               <th style={ui.th}>Growth (YoY)</th>
               <th style={ui.th}>10Y yield</th>
@@ -1069,21 +1098,260 @@ function MacroInsightsResult({ result }) {
                   {pct(r.diff)}
                 </td>
                 <td style={ui.td}>{r.hit ? "✓" : "✕"}</td>
-                <td style={ui.td}>{r.inflationYoY === null ? "—" : pct(r.inflationYoY, 1)}</td>
-                <td style={ui.td}>{r.growthYoY === null ? "—" : pct(r.growthYoY, 1)}</td>
-                <td style={ui.td}>{r.rateLevel === null ? "—" : `${r.rateLevel.toFixed(2)}%`}</td>
+                {meta.tickers.length === 2 && <td style={ui.td}>{r.winner ?? "—"}</td>}
                 <td style={ui.td}>
-                  {r.rateChangeYoY === null ? "—" : `${r.rateChangeYoY >= 0 ? "+" : ""}${r.rateChangeYoY.toFixed(2)}pp`}
+                  <MacroValue
+                    value={r.inflationYoY}
+                    entry={byKey(r, "inflationYoY")}
+                    format={MACRO_FEATURE_META.inflationYoY.format}
+                    featureLabel={MACRO_FEATURE_META.inflationYoY.label}
+                    onMacroAudit={onMacroAudit}
+                  />
                 </td>
                 <td style={ui.td}>
-                  {r.yieldCurveSlope === null ? "—" : `${r.yieldCurveSlope >= 0 ? "+" : ""}${r.yieldCurveSlope.toFixed(2)}pp`}
+                  <MacroValue
+                    value={r.growthYoY}
+                    entry={byKey(r, "growthYoY")}
+                    format={MACRO_FEATURE_META.growthYoY.format}
+                    featureLabel={MACRO_FEATURE_META.growthYoY.label}
+                    onMacroAudit={onMacroAudit}
+                  />
                 </td>
-                <td style={ui.td}>{macroCell(r.vixAverage === null ? null : r.vixAverage.toFixed(1))}</td>
+                <td style={ui.td}>
+                  <MacroValue
+                    value={r.rateLevel}
+                    entry={byKey(r, "rateLevel")}
+                    format={MACRO_FEATURE_META.rateLevel.format}
+                    featureLabel={MACRO_FEATURE_META.rateLevel.label}
+                    onMacroAudit={onMacroAudit}
+                  />
+                </td>
+                <td style={ui.td}>
+                  <MacroValue
+                    value={r.rateChangeYoY}
+                    entry={byKey(r, "rateChangeYoY")}
+                    format={MACRO_FEATURE_META.rateChangeYoY.format}
+                    featureLabel={MACRO_FEATURE_META.rateChangeYoY.label}
+                    onMacroAudit={onMacroAudit}
+                  />
+                </td>
+                <td style={ui.td}>
+                  <MacroValue
+                    value={r.yieldCurveSlope}
+                    entry={byKey(r, "yieldCurveSlope")}
+                    format={MACRO_FEATURE_META.yieldCurveSlope.format}
+                    featureLabel={MACRO_FEATURE_META.yieldCurveSlope.label}
+                    onMacroAudit={onMacroAudit}
+                  />
+                </td>
+                <td style={ui.td}>
+                  <MacroValue
+                    value={r.vixAverage}
+                    entry={byKey(r, "vixAverage")}
+                    format={MACRO_FEATURE_META.vixAverage.format}
+                    featureLabel={MACRO_FEATURE_META.vixAverage.label}
+                    onMacroAudit={onMacroAudit}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+// The direct "which asset to hold" answer: the macro split that best predicts who actually led
+// each year (not just whether trusting the signal paid off — see the separate edgeSplit block).
+function AssetSplitCallout({ assetSplit, yearsUsed }) {
+  const meta = MACRO_FEATURE_META[assetSplit.feature] || { label: assetSplit.feature, format: (v) => v };
+  const belowFavors = assetSplit.tickerAShareBelow >= 0.5 ? assetSplit.tickerA : assetSplit.tickerB;
+  const belowShare = assetSplit.tickerAShareBelow >= 0.5 ? assetSplit.tickerAShareBelow : 1 - assetSplit.tickerAShareBelow;
+  const aboveFavors = assetSplit.tickerAShareAbove >= 0.5 ? assetSplit.tickerA : assetSplit.tickerB;
+  const aboveShare = assetSplit.tickerAShareAbove >= 0.5 ? assetSplit.tickerAShareAbove : 1 - assetSplit.tickerAShareAbove;
+
+  return (
+    <div
+      style={{
+        background: colors.primarySoft,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 10,
+        padding: 16,
+        marginTop: 8,
+        marginBottom: 16,
+      }}
+    >
+      <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, color: colors.primary }}>
+        Which asset does this regime favor?
+      </div>
+      <p style={{ margin: "6px 0 12px 0", fontSize: 14 }}>
+        When <strong>{meta.label}</strong> was <strong>below {meta.format(assetSplit.threshold)}</strong>,{" "}
+        <strong>{belowFavors}</strong> led in <strong style={{ color: colors.success }}>{pct(belowShare, 0)}</strong> of{" "}
+        {assetSplit.nBelow} years. Above that threshold, <strong>{aboveFavors}</strong> led in{" "}
+        <strong style={{ color: colors.success }}>{pct(aboveShare, 0)}</strong> of {assetSplit.nAbove} years.
+      </p>
+      <p style={{ ...ui.muted, margin: 0 }}>
+        Best split out of 6 macro features tested, predicting who actually led — not just whether the signal was
+        worth trusting. Same small-sample caveat as everywhere else on this page: {yearsUsed} yearly observations is
+        a hypothesis to watch, not a proven rule.
+      </p>
+    </div>
+  );
+}
+
+// This year's read: what the raw Jan-Feb-style signal picked vs. what current macro conditions
+// have historically favored — a disagreement between the two is exactly the "the seasonal
+// pattern might be a false positive this year" flag the page is meant to surface.
+function LiveReadCallout({ liveRead, onAudit, onMacroAudit }) {
+  const hasMacroPick = liveRead.macroPick !== undefined && liveRead.macroPick !== null;
+  const disagree = hasMacroPick && liveRead.agreesWithSignal === false;
+  const hasSince = liveRead.sinceSignalReturnA !== undefined;
+
+  return (
+    <div
+      style={{
+        background: disagree ? colors.warningSoft : colors.successSoft,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 10,
+        padding: 16,
+        marginTop: 8,
+        marginBottom: 16,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: 0.4,
+          color: disagree ? colors.warning : colors.success,
+        }}
+      >
+        This year's read ({liveRead.year})
+      </div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 24, marginTop: 8, fontSize: 14 }}>
+        <div>
+          <div style={{ ...ui.muted, marginBottom: 2 }}>The raw signal picked</div>
+          <div style={{ fontWeight: 700, fontSize: 16 }}>{liveRead.signalPick ?? "—"}</div>
+          <div style={{ fontSize: 12.5, marginTop: 2 }}>
+            <span
+              style={auditableCell}
+              title="Click to audit this number"
+              onClick={() => onAudit({ title: `${liveRead.tickerA} · signal window`, components: [liveRead.signalAuditA] })}
+            >
+              {liveRead.tickerA} {pct(liveRead.signalReturnA)}
+            </span>{" "}
+            vs.{" "}
+            <span
+              style={auditableCell}
+              title="Click to audit this number"
+              onClick={() => onAudit({ title: `${liveRead.tickerB} · signal window`, components: [liveRead.signalAuditB] })}
+            >
+              {liveRead.tickerB} {pct(liveRead.signalReturnB)}
+            </span>
+          </div>
+        </div>
+
+        {hasMacroPick && (
+          <div>
+            <div style={{ ...ui.muted, marginBottom: 2 }}>Current macro conditions favor</div>
+            <div style={{ fontWeight: 700, fontSize: 16 }}>{liveRead.macroPick}</div>
+            <div style={{ fontSize: 12.5, marginTop: 2 }}>
+              <MacroValue
+                value={liveRead.macroValue}
+                entry={liveRead.macroAudit ? liveRead.macroAudit[liveRead.macroFeature] : null}
+                format={MACRO_FEATURE_META[liveRead.macroFeature]?.format || ((v) => v)}
+                featureLabel={MACRO_FEATURE_META[liveRead.macroFeature]?.label || liveRead.macroFeature}
+                onMacroAudit={onMacroAudit}
+              />{" "}
+              ({liveRead.macroSide} the historical {MACRO_FEATURE_META[liveRead.macroFeature]?.format(liveRead.macroThreshold)}{" "}
+              split) — favored this asset in {pct(liveRead.macroHistoricalWinShare, 0)} of comparable years
+            </div>
+          </div>
+        )}
+
+        {hasSince && (
+          <div>
+            <div style={{ ...ui.muted, marginBottom: 2 }}>Actual performance since the signal window ended</div>
+            <div style={{ fontSize: 12.5 }}>
+              <span
+                style={auditableCell}
+                title="Click to audit this number"
+                onClick={() => onAudit({ title: `${liveRead.tickerA} · since signal window`, components: [liveRead.sinceSignalAuditA] })}
+              >
+                {liveRead.tickerA} {pct(liveRead.sinceSignalReturnA)}
+              </span>{" "}
+              vs.{" "}
+              <span
+                style={auditableCell}
+                title="Click to audit this number"
+                onClick={() => onAudit({ title: `${liveRead.tickerB} · since signal window`, components: [liveRead.sinceSignalAuditB] })}
+              >
+                {liveRead.tickerB} {pct(liveRead.sinceSignalReturnB)}
+              </span>{" "}
+              <span style={ui.muted}>(through {liveRead.asOfDate})</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {disagree && (
+        <p style={{ margin: "12px 0 0 0", fontSize: 13, color: colors.warning, fontWeight: 600 }}>
+          ⚠ The raw seasonal signal and the macro-based read disagree this year — exactly the situation where blindly
+          following January-February performance risks a false positive.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// Audit drawer for one macro FeatureAudit (seriesId/dates/formula) — the live read's own
+// signal/since-signal numbers are ordinary ReturnCalc audits and go through the page's regular
+// onAudit/AuditPanel instead (see LiveReadCallout), not this component.
+function MacroAuditDrawer({ detail, onClose }) {
+  if (!detail) return null;
+  const { featureLabel, entry } = detail;
+  const isRange = entry.windowStart && entry.windowEnd;
+  return (
+    <Drawer kicker="Macro data source" title={featureLabel} subtitle={`${entry.seriesName} (FRED: ${entry.seriesId})`} onClose={onClose}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 13.5 }}>
+        <Row label="Requested as of" value={entry.requestedAsOf} />
+        {isRange ? (
+          <>
+            <Row label="Interval covered" value={`${entry.windowStart} → ${entry.windowEnd}`} />
+            <Row label="Readings averaged" value={entry.observationCount} />
+          </>
+        ) : (
+          <>
+            <Row label="Data point used" value={entry.asOfDate} />
+            <Row label="Value" value={entry.asOfValue} />
+            {entry.priorDate && <Row label="Compared against" value={`${entry.priorDate} (value ${entry.priorValue})`} />}
+          </>
+        )}
+        <div
+          style={{
+            marginTop: 6,
+            paddingTop: 10,
+            borderTop: `1px dashed ${colors.border}`,
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+            fontSize: 12.5,
+            color: colors.textMuted,
+          }}
+        >
+          {entry.formula || "No data available for this reading."}
+        </div>
+      </div>
+    </Drawer>
+  );
+}
+
+function Row({ label, value }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+      <span style={{ color: colors.textMuted }}>{label}</span>
+      <span style={{ fontWeight: 600 }}>{value === null || value === undefined ? "—" : value}</span>
     </div>
   );
 }
