@@ -245,6 +245,11 @@ public class SeasonalityService {
             row.put("diff", diff);
             row.put("hit", diff >= 0);
             if (twoTickers) row.put("winner", actualWinner == null ? null : actualWinner.ticker());
+            // Same shape as the main strategy table's per-year audit: which ticker(s) made up the
+            // signal's pick vs. the whole covered universe that year, each with its own real
+            // start/end date+price — lets the UI audit "Edge" instead of treating it as opaque.
+            row.put("strategyReturnAudit", topQuartile.stream().map(p -> auditMap(p.ticker(), p.rest())).toList());
+            row.put("benchmarkReturnAudit", yearPoints.stream().map(p -> auditMap(p.ticker(), p.rest())).toList());
             row.put("inflationYoY", snap.inflationYoY());
             row.put("growthYoY", snap.growthYoY());
             row.put("rateLevel", snap.rateLevel());

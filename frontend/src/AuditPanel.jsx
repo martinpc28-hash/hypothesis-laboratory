@@ -20,7 +20,7 @@ function formatPct(v, digits = 2) {
   return v === null || v === undefined || Number.isNaN(v) ? "n/a" : `${(v * 100).toFixed(digits)}%`;
 }
 
-function ComponentDetail({ c }) {
+export function ComponentDetail({ c }) {
   const missing = c.value === null || c.value === undefined;
   return (
     <div
