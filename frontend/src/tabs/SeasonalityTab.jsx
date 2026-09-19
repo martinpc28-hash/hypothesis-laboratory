@@ -1110,6 +1110,7 @@ function MacroInsightsResult({ result, onAudit, onMacroAudit, onEdgeAudit, onMac
               <th style={ui.th}>Year</th>
               <th style={ui.th}>Edge</th>
               <th style={ui.th}>Hit</th>
+              {showAssetCols && <th style={ui.th}>Signal pick</th>}
               {showAssetCols && <th style={ui.th}>Winner</th>}
               {showAssetCols && assetSplit && <th style={ui.th}>Macro pick</th>}
               <th style={ui.th}>Inflation (YoY)</th>
@@ -1143,6 +1144,24 @@ function MacroInsightsResult({ result, onAudit, onMacroAudit, onEdgeAudit, onMac
                   {pct(r.diff)}
                 </td>
                 <td style={ui.td}>{r.hit ? "✓" : "✕"}</td>
+                {showAssetCols && (
+                  <td
+                    style={r.signalPick ? { ...ui.td, ...auditableCell } : ui.td}
+                    title={r.signalPick ? "Click to audit this pick's return" : undefined}
+                    onClick={
+                      r.signalPick
+                        ? () =>
+                            onAudit({
+                              title: `Signal pick · ${r.year}`,
+                              subtitle: "Rest of year return (chosen by highest signal-window return)",
+                              components: r.strategyReturnAudit,
+                            })
+                        : undefined
+                    }
+                  >
+                    {r.signalPick ?? "—"}
+                  </td>
+                )}
                 {showAssetCols && <td style={ui.td}>{r.winner ?? "—"}</td>}
                 {showAssetCols && assetSplit && (
                   <td

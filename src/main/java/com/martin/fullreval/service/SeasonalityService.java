@@ -244,6 +244,10 @@ public class SeasonalityService {
             row.put("year", year);
             row.put("diff", diff);
             row.put("hit", diff >= 0);
+            // topQuartile has exactly 1 member here (ceil(2/4.0) = 1) — the ticker the raw signal
+            // itself picked that year, as opposed to "winner" (who actually led). Shown side by
+            // side with Winner/Macro pick in the UI so the raw signal's call is never left implicit.
+            if (twoTickers) row.put("signalPick", topQuartile.get(0).ticker());
             if (twoTickers) row.put("winner", actualWinner == null ? null : actualWinner.ticker());
             // Same shape as the main strategy table's per-year audit: which ticker(s) made up the
             // signal's pick vs. the whole covered universe that year, each with its own real
