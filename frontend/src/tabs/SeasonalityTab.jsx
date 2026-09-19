@@ -28,7 +28,11 @@ function windowLabel(startMonth, lengthMonths) {
   return `${MONTH_NAMES[startMonth - 1]} (${lengthMonths}m) → holdings from ${MONTH_NAMES[holdStartMonth - 1]}`;
 }
 const CURRENT_YEAR = new Date().getFullYear();
-const DEFAULT_YEAR_FROM = Math.max(2001, CURRENT_YEAR - 20);
+// Fixed at 2000 (not a rolling "N years back") rather than the prior 20-year rolling window:
+// testing this combo back to 2000 — through the dot-com crash — turned up a much stronger,
+// more economically sensible macro split (10Y Treasury level) than the shorter 2006+ window
+// ever surfaced, so the extra history is worth defaulting to rather than opting into.
+const DEFAULT_YEAR_FROM = 2000;
 const DEFAULT_YEAR_TO = CURRENT_YEAR - 1;
 
 function pct(v, digits = 1) {
