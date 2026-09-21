@@ -11,4 +11,7 @@ public class VixTimingRequest {
     public double enterVix = 30.0;
     /** Go back to cash once the VIX closes at or below this. */
     public double exitVix = 15.0;
+    /** EUR mode only: invest the equity leg in a synthetic EUR-hedged S&P 500 (covered interest
+     * rate parity) instead of the plain FX-exposed one. Ignored when currency is USD. */
+    public boolean hedged = false;
 }

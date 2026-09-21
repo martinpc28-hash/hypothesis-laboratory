@@ -67,13 +67,16 @@ public class VixTimingService {
 
         String cashSeriesId = currency.equals("EUR") ? EUR_CASH_SERIES : USD_CASH_SERIES;
         String cashSeriesName = currency.equals("EUR") ? EUR_CASH_NAME : USD_CASH_NAME;
-        boolean includeHedged = currency.equals("EUR");
+        // "hedged" is an actual choice of WHAT to invest in during equity legs (a EUR-hedged S&P
+        // 500 vs. the plain FX-exposed one), not a passive extra benchmark line — only meaningful
+        // in EUR mode, since a USD account has nothing to hedge against.
+        boolean useHedged = currency.equals("EUR") && req.hedged;
 
         NavigableMap<LocalDate, BigDecimal> vix = (NavigableMap<LocalDate, BigDecimal>) fredClient.fetchSeries("VIXCLS");
         NavigableMap<LocalDate, BigDecimal> cashRate = (NavigableMap<LocalDate, BigDecimal>) fredClient.fetchSeries(cashSeriesId);
-        // Fetched even outside EUR mode's own cash leg: needed for the synthetic EUR-hedged S&P
-        // 500 comparison line (covered interest rate parity needs BOTH legs' short rates).
-        NavigableMap<LocalDate, BigDecimal> usdRateForHedge = includeHedged
+        // Only fetched when actually needed: covered interest rate parity (the hedged-return
+        // formula) needs the USD short rate even though the account itself never touches USD cash.
+        NavigableMap<LocalDate, BigDecimal> usdRateForHedge = useHedged
                 ? (NavigableMap<LocalDate, BigDecimal>) fredClient.fetchSeries(USD_CASH_SERIES) : null;
         NavigableMap<LocalDate, BigDecimal> spy = yahooFinanceService.fetchDailyCloses("SPY");
         NavigableMap<LocalDate, BigDecimal> urth = yahooFinanceService.fetchDailyCloses("URTH");
@@ -98,11 +101,9 @@ public class VixTimingService {
         double strategyWealth = 1.0, strategyPeak = 1.0, strategyMaxDD = 0.0;
         double sp500Wealth = 1.0, sp500Peak = 1.0, sp500MaxDD = 0.0;
         double msciWealth = 1.0, msciPeak = 1.0, msciMaxDD = 0.0;
-        double sp500HedgedWealth = 1.0, sp500HedgedPeak = 1.0, sp500HedgedMaxDD = 0.0;
         List<Double> strategyDaily = new ArrayList<>();
         List<Double> sp500Daily = new ArrayList<>();
         List<Double> msciDaily = new ArrayList<>();
-        List<Double> sp500HedgedDaily = new ArrayList<>();
         int daysInEquity = 0, daysInCash = 0;
 
         Map<Integer, Map<String, Object>> cumulativeByYear = new LinkedHashMap<>();
@@ -110,7 +111,7 @@ public class VixTimingService {
 
         // Unlike the equity-only version, every day belongs to SOME position (equity or cash), so
         // the segment list covers the whole requested range end to end, not just the equity legs.
-        Map<String, Object> segment = openSegment(inEquity, tradingDays.get(0), vix0, spy, cashRate, usdPerEur, currency);
+        Map<String, Object> segment = openSegment(inEquity, tradingDays.get(0), vix0, spy, cashRate, usdPerEur, currency, useHedged);
         double segmentMultiplier = 1.0;
 
         for (int i = 1; i < tradingDays.size(); i++) {
@@ -118,7 +119,7 @@ public class VixTimingService {
             LocalDate day = tradingDays.get(i);
 
             double sp500Ret = usdReturn(spy, prevDay, day);
-            double sp500RetInCcy = currency.equals("EUR") ? fxAdjust(usdPerEur, prevDay, day, sp500Ret) : sp500Ret;
+            double sp500RetInCcy = sp500ReturnInAccountCcy(sp500Ret, currency, useHedged, cashRate, usdRateForHedge, usdPerEur, prevDay, day);
             double strategyRet = inEquity ? sp500RetInCcy : cashReturn(cashRate, prevDay, day);
             if (inEquity) daysInEquity++; else daysInCash++;
             segmentMultiplier *= 1.0 + strategyRet;
@@ -145,25 +146,10 @@ public class VixTimingService {
                 }
             }
 
-            if (includeHedged) {
-                // Synthetic EUR-hedged S&P 500: covered interest rate parity — the USD leg's
-                // return, with the EUR/USD FX move replaced by the (rolling) forward-hedging
-                // cost implied by the two currencies' short rates, instead of the real spot move
-                // fxAdjust uses. This is the standard approximation currency-hedged UCITS ETFs
-                // themselves use (rolled 1-3 month forwards), not a real quoted product — there
-                // is no free EUR-hedged S&P 500 data source going back to 2000.
-                double hedgedRet = (1.0 + sp500Ret) * (1.0 + cashReturn(cashRate, prevDay, day)) / (1.0 + cashReturn(usdRateForHedge, prevDay, day)) - 1.0;
-                sp500HedgedWealth *= 1.0 + hedgedRet;
-                sp500HedgedPeak = Math.max(sp500HedgedPeak, sp500HedgedWealth);
-                sp500HedgedMaxDD = Math.min(sp500HedgedMaxDD, (sp500HedgedWealth - sp500HedgedPeak) / sp500HedgedPeak);
-                sp500HedgedDaily.add(hedgedRet);
-            }
-
             Map<String, Object> yearPoint = cumulativeByYear.computeIfAbsent(day.getYear(), y -> new LinkedHashMap<>(Map.of("year", y)));
             yearPoint.put("cumulativeStrategy", strategyWealth - 1.0);
             yearPoint.put("cumulativeSp500", sp500Wealth - 1.0);
             if (includeMsciWorld) yearPoint.put("cumulativeMsciWorld", msciWealth - 1.0);
-            if (includeHedged) yearPoint.put("cumulativeSp500Hedged", sp500HedgedWealth - 1.0);
 
             // Position for the NEXT day is decided from TODAY's now-known close.
             Double vixToday = floorValue(vix, day);
@@ -171,7 +157,7 @@ public class VixTimingService {
                 inEquity = !inEquity;
                 closeSegment(segment, day, vixToday, segmentMultiplier, spy, cashRate, usdPerEur, currency, false);
                 trades.add(segment);
-                segment = openSegment(inEquity, day, vixToday, spy, cashRate, usdPerEur, currency);
+                segment = openSegment(inEquity, day, vixToday, spy, cashRate, usdPerEur, currency, useHedged);
                 segmentMultiplier = 1.0;
             }
         }
@@ -190,18 +176,17 @@ public class VixTimingService {
         meta.put("cashSeriesName", cashSeriesName);
         meta.put("enterVix", enterVix);
         meta.put("exitVix", exitVix);
+        meta.put("hedged", useHedged);
         meta.put("tradingDays", tradingDays.size());
         result.put("meta", meta);
 
         result.put("cumulative", cumulativeByYear.values().stream().toList());
         result.put("msciWorldAvailable", includeMsciWorld);
-        result.put("sp500HedgedAvailable", includeHedged);
 
         Map<String, Object> stats = new LinkedHashMap<>();
         stats.put("strategy", statBlock(strategyWealth, strategyMaxDD, strategyDaily, yearsElapsed));
         stats.put("sp500", statBlock(sp500Wealth, sp500MaxDD, sp500Daily, yearsElapsed));
         if (includeMsciWorld) stats.put("msciWorld", statBlock(msciWealth, msciMaxDD, msciDaily, yearsElapsed));
-        if (includeHedged) stats.put("sp500Hedged", statBlock(sp500HedgedWealth, sp500HedgedMaxDD, sp500HedgedDaily, yearsElapsed));
         result.put("stats", stats);
 
         result.put("trades", trades);
@@ -214,17 +199,21 @@ public class VixTimingService {
     }
 
     /** Starts a new EQUITY or CASH segment, recording whatever "entry marker" that type needs for
-     * later auditing: an SPY price for EQUITY, the money-market rate quoted that day for CASH. */
+     * later auditing: an SPY price for EQUITY, the money-market rate quoted that day for CASH.
+     * A hedged EQUITY segment also records which EUR/USD short rates were in force at entry,
+     * since its return isn't reducible to a single price-ratio formula the way the unhedged or
+     * cash legs are. */
     private Map<String, Object> openSegment(boolean equity, LocalDate entryDate, Double vixAtEntry,
                                              NavigableMap<LocalDate, BigDecimal> spy, NavigableMap<LocalDate, BigDecimal> cashRate,
-                                             NavigableMap<LocalDate, BigDecimal> usdPerEur, String currency) {
+                                             NavigableMap<LocalDate, BigDecimal> usdPerEur, String currency, boolean hedged) {
         Map<String, Object> s = new LinkedHashMap<>();
         s.put("type", equity ? "EQUITY" : "CASH");
         s.put("entryDate", entryDate.toString());
         s.put("vixAtEntry", vixAtEntry);
         if (equity) {
             s.put("entryPrice", spy.get(entryDate).doubleValue());
-            if (currency.equals("EUR")) s.put("fxAtEntry", floorValue(usdPerEur, entryDate));
+            s.put("hedged", hedged);
+            if (currency.equals("EUR") && !hedged) s.put("fxAtEntry", floorValue(usdPerEur, entryDate));
         } else {
             s.put("entryRate", floorValue(cashRate, entryDate));
         }
@@ -236,12 +225,13 @@ public class VixTimingService {
                                NavigableMap<LocalDate, BigDecimal> spy, NavigableMap<LocalDate, BigDecimal> cashRate,
                                NavigableMap<LocalDate, BigDecimal> usdPerEur, String currency, boolean open) {
         boolean equity = "EQUITY".equals(segment.get("type"));
+        boolean hedged = Boolean.TRUE.equals(segment.get("hedged"));
         String dateKey = open ? "asOfDate" : "exitDate";
         segment.put(dateKey, exitDate.toString());
         if (!open) segment.put("vixAtExit", vixAtExit);
         if (equity) {
             segment.put(open ? "asOfPrice" : "exitPrice", spy.get(exitDate).doubleValue());
-            if (currency.equals("EUR")) segment.put(open ? "fxAsOf" : "fxAtExit", floorValue(usdPerEur, exitDate));
+            if (currency.equals("EUR") && !hedged) segment.put(open ? "fxAsOf" : "fxAtExit", floorValue(usdPerEur, exitDate));
         } else {
             segment.put(open ? "asOfRate" : "exitRate", floorValue(cashRate, exitDate));
         }
@@ -270,6 +260,19 @@ public class VixTimingService {
     private double usdReturn(NavigableMap<LocalDate, BigDecimal> closes, LocalDate prevDay, LocalDate day) {
         BigDecimal p0 = closes.get(prevDay), p1 = closes.get(day);
         return p1.subtract(p0).divide(p0, MathContext.DECIMAL64).doubleValue();
+    }
+
+    /** The S&P 500's one-day return, converted into whatever the account actually holds: plain
+     * USD, EUR with real spot FX exposure, or synthetic EUR-hedged (covered interest rate
+     * parity: the USD return with the spot FX move replaced by the EUR/USD short-rate
+     * differential — the same approximation real currency-hedged UCITS ETFs use, rolling
+     * short-dated forwards, since there's no free EUR-hedged S&P 500 data source back to 2000). */
+    private double sp500ReturnInAccountCcy(double usdReturn, String currency, boolean hedged,
+                                            NavigableMap<LocalDate, BigDecimal> eurRate, NavigableMap<LocalDate, BigDecimal> usdRateForHedge,
+                                            NavigableMap<LocalDate, BigDecimal> usdPerEur, LocalDate prevDay, LocalDate day) {
+        if (!currency.equals("EUR")) return usdReturn;
+        if (hedged) return (1.0 + usdReturn) * (1.0 + cashReturn(eurRate, prevDay, day)) / (1.0 + cashReturn(usdRateForHedge, prevDay, day)) - 1.0;
+        return fxAdjust(usdPerEur, prevDay, day, usdReturn);
     }
 
     /** A EUR investor converts EUR->USD to buy a USD asset and back on the way out, so their

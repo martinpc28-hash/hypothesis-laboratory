@@ -35,6 +35,7 @@ export default function VixTimingTab({ setStatus }) {
   const [yearFrom, setYearFrom] = useState(DEFAULT_YEAR_FROM);
   const [yearTo, setYearTo] = useState(DEFAULT_YEAR_TO);
   const [currency, setCurrency] = useState("USD");
+  const [hedged, setHedged] = useState(false);
   const [enterVix, setEnterVix] = useState(VIX_PRESETS[0].enter);
   const [exitVix, setExitVix] = useState(VIX_PRESETS[0].exit);
   const [loading, setLoading] = useState(false);
@@ -43,7 +44,7 @@ export default function VixTimingTab({ setStatus }) {
   async function run() {
     setLoading(true);
     try {
-      const body = { yearFrom, yearTo, currency, enterVix, exitVix };
+      const body = { yearFrom, yearTo, currency, hedged: currency === "EUR" && hedged, enterVix, exitVix };
       const res = await api.runVixTimingBacktest(body);
       setResult(res);
     } catch (e) {
@@ -103,6 +104,15 @@ export default function VixTimingTab({ setStatus }) {
               <option value="EUR">EUR — Euríbor 3M interbancario</option>
             </select>
           </label>
+          {currency === "EUR" && (
+            <label style={ui.label}>
+              Invertir en
+              <select style={ui.input} value={hedged ? "hedged" : "plain"} onChange={(e) => setHedged(e.target.value === "hedged")}>
+                <option value="plain">S&P 500 sin cobertura (expuesto a USD/EUR)</option>
+                <option value="hedged">S&P 500 EUR hedged (sintético)</option>
+              </select>
+            </label>
+          )}
           <button style={ui.button("primary")} onClick={run} disabled={loading}>
             {loading ? "Calculando…" : "Correr backtest"}
           </button>
@@ -115,26 +125,14 @@ export default function VixTimingTab({ setStatus }) {
 }
 
 function VixTimingResult({ result }) {
-  const {
-    meta,
-    stats,
-    cumulative,
-    msciWorldAvailable,
-    sp500HedgedAvailable,
-    trades,
-    tradesCount,
-    daysInEquity,
-    daysInCash,
-    pctTimeInEquity,
-  } = result;
+  const { meta, stats, cumulative, msciWorldAvailable, trades, tradesCount, daysInEquity, daysInCash, pctTimeInEquity } =
+    result;
   const [tradeAudit, setTradeAudit] = useState(null);
 
+  const sp500Label = meta.hedged ? "S&P 500 EUR hedged (sintético)" : "S&P 500 buy & hold";
   const series = [
-    { key: "cumulativeStrategy", label: "VIX timing", color: colors.success },
-    { key: "cumulativeSp500", label: "S&P 500 buy & hold", color: colors.primary },
-    ...(sp500HedgedAvailable
-      ? [{ key: "cumulativeSp500Hedged", label: "S&P 500 EUR hedged (sintético)", color: colors.primaryDark }]
-      : []),
+    { key: "cumulativeStrategy", label: `VIX timing${meta.hedged ? " (hedged)" : ""}`, color: colors.success },
+    { key: "cumulativeSp500", label: sp500Label, color: colors.primary },
     ...(msciWorldAvailable ? [{ key: "cumulativeMsciWorld", label: "MSCI World buy & hold", color: colors.warning }] : []),
   ];
 
@@ -143,8 +141,9 @@ function VixTimingResult({ result }) {
       <div style={ui.card}>
         <h3 style={ui.cardTitle}>Resultados {meta.yearFrom}–{meta.yearTo}</h3>
         <p style={ui.cardSubtitle}>
-          Monetario en {meta.currency} ({meta.cashSeriesName}, FRED {meta.cashSeriesId}) · entra en S&amp;P 500 con
-          VIX ≥ {meta.enterVix} · sale con VIX ≤ {meta.exitVix}
+          Monetario en {meta.currency} ({meta.cashSeriesName}, FRED {meta.cashSeriesId}) · entra en{" "}
+          {meta.hedged ? "S&P 500 EUR hedged (sintético)" : "S&P 500"} con VIX ≥ {meta.enterVix} · sale con VIX ≤{" "}
+          {meta.exitVix}
         </p>
         <div style={ui.tableScroll}>
           <table style={ui.table}>
@@ -166,21 +165,12 @@ function VixTimingResult({ result }) {
                 <td style={ui.td}>{pct(stats.strategy.maxDrawdown)}</td>
               </tr>
               <tr>
-                <td style={ui.td}>S&amp;P 500 buy &amp; hold</td>
+                <td style={ui.td}>{sp500Label}</td>
                 <td style={ui.td}>{pct(stats.sp500.totalReturn)}</td>
                 <td style={ui.td}>{pct(stats.sp500.cagr)}</td>
                 <td style={ui.td}>{pct(stats.sp500.volatility)}</td>
                 <td style={ui.td}>{pct(stats.sp500.maxDrawdown)}</td>
               </tr>
-              {sp500HedgedAvailable && (
-                <tr>
-                  <td style={ui.td}>S&amp;P 500 EUR hedged (sintético)</td>
-                  <td style={ui.td}>{pct(stats.sp500Hedged.totalReturn)}</td>
-                  <td style={ui.td}>{pct(stats.sp500Hedged.cagr)}</td>
-                  <td style={ui.td}>{pct(stats.sp500Hedged.volatility)}</td>
-                  <td style={ui.td}>{pct(stats.sp500Hedged.maxDrawdown)}</td>
-                </tr>
-              )}
               {msciWorldAvailable && (
                 <tr>
                   <td style={ui.td}>MSCI World buy &amp; hold</td>
@@ -193,11 +183,12 @@ function VixTimingResult({ result }) {
             </tbody>
           </table>
         </div>
-        {sp500HedgedAvailable && (
+        {meta.hedged && (
           <p style={ui.muted}>
             "EUR hedged (sintético)" no es un producto cotizado — no existe una serie gratuita de S&amp;P 500 EUR
             hedged hasta 2000 — sino el retorno en USD ajustado por el diferencial de tasas Euríbor/T-Bill (paridad
-            de tasas cubierta), la misma metodología que usan los ETFs hedged reales.
+            de tasas cubierta), la misma metodología que usan los ETFs hedged reales. Tanto la estrategia VIX timing
+            como el benchmark de arriba invierten en esta versión mientras están en S&amp;P 500.
           </p>
         )}
         {!msciWorldAvailable && (
@@ -249,7 +240,7 @@ function VixTimingResult({ result }) {
                 <tr key={i}>
                   <td style={ui.td}>
                     <span style={ui.badge(t.type === "EQUITY" ? "primary" : "neutral")}>
-                      {t.type === "EQUITY" ? "S&P 500" : `Monetario ${meta.currency}`}
+                      {t.type === "EQUITY" ? (t.hedged ? "S&P 500 hedged" : "S&P 500") : `Monetario ${meta.currency}`}
                     </span>
                   </td>
                   <td style={ui.td}>{t.entryDate}</td>
@@ -294,6 +285,7 @@ function TradeAuditDrawer({ detail, onClose }) {
 
 function EquityAuditDrawer({ t, currency, onClose }) {
   const isEur = currency === "EUR";
+  const isHedged = !!t.hedged;
   const exitLabel = t.open ? "Precio actual (operación abierta)" : "Fecha / precio de venta";
   const exitDate = t.open ? t.asOfDate : t.exitDate;
   const exitPrice = t.open ? t.asOfPrice : t.exitPrice;
@@ -302,25 +294,25 @@ function EquityAuditDrawer({ t, currency, onClose }) {
   return (
     <Drawer
       kicker="Auditoría del tramo"
-      title="Precios de compra y venta (SPY)"
+      title={isHedged ? "S&P 500 EUR hedged (sintético)" : "Precios de compra y venta (SPY)"}
       subtitle={`VIX ${t.vixAtEntry?.toFixed(1)} en la entrada${t.open ? "" : ` · VIX ${t.vixAtExit?.toFixed(1)} en la salida`}`}
       onClose={onClose}
     >
       <table style={{ width: "100%", fontSize: 12.5, borderCollapse: "collapse" }}>
         <tbody>
           <tr>
-            <td style={{ padding: "3px 0", color: colors.textMuted, width: "45%" }}>Fecha / precio de compra</td>
+            <td style={{ padding: "3px 0", color: colors.textMuted, width: "45%" }}>Fecha / precio de compra (SPY)</td>
             <td style={{ padding: "3px 0", textAlign: "right" }}>
               {formatDate(t.entryDate)} · <strong>{formatPrice(t.entryPrice)}</strong>
             </td>
           </tr>
           <tr>
-            <td style={{ padding: "3px 0", color: colors.textMuted }}>{exitLabel}</td>
+            <td style={{ padding: "3px 0", color: colors.textMuted }}>{exitLabel} (SPY)</td>
             <td style={{ padding: "3px 0", textAlign: "right" }}>
               {formatDate(exitDate)} · <strong>{formatPrice(exitPrice)}</strong>
             </td>
           </tr>
-          {isEur && (
+          {isEur && !isHedged && (
             <>
               <tr>
                 <td style={{ padding: "3px 0", color: colors.textMuted }}>USD/EUR en la compra</td>
@@ -334,25 +326,34 @@ function EquityAuditDrawer({ t, currency, onClose }) {
           )}
         </tbody>
       </table>
-      <div
-        style={{
-          marginTop: 10,
-          paddingTop: 10,
-          borderTop: `1px dashed ${colors.border}`,
-          fontSize: 12.5,
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-          color: colors.textMuted,
-        }}
-      >
-        {isEur
-          ? `(fx compra / fx venta) × (1 + (${formatPrice(exitPrice)} − ${formatPrice(t.entryPrice)}) / ${formatPrice(
-              t.entryPrice
-            )}) − 1 = ${pct(t.tradeReturn, 2)}`
-          : `(${formatPrice(exitPrice)} − ${formatPrice(t.entryPrice)}) / ${formatPrice(t.entryPrice)} = ${pct(
-              t.tradeReturn,
-              2
-            )}`}
-      </div>
+      {isHedged ? (
+        <p style={{ ...ui.muted, marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${colors.border}` }}>
+          El retorno del tramo ({pct(t.tradeReturn, 2)}) es el movimiento de SPY en USD más el diferencial de tasas
+          Euríbor 3M / T-Bill 3M, capitalizado día a día (paridad de tasas cubierta) — no una fórmula de un solo
+          paso, porque el diferencial varió a lo largo del tramo. Reemplaza el movimiento real de USD/EUR por el
+          costo de cobertura implícito en esas tasas.
+        </p>
+      ) : (
+        <div
+          style={{
+            marginTop: 10,
+            paddingTop: 10,
+            borderTop: `1px dashed ${colors.border}`,
+            fontSize: 12.5,
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+            color: colors.textMuted,
+          }}
+        >
+          {isEur
+            ? `(fx compra / fx venta) × (1 + (${formatPrice(exitPrice)} − ${formatPrice(t.entryPrice)}) / ${formatPrice(
+                t.entryPrice
+              )}) − 1 = ${pct(t.tradeReturn, 2)}`
+            : `(${formatPrice(exitPrice)} − ${formatPrice(t.entryPrice)}) / ${formatPrice(t.entryPrice)} = ${pct(
+                t.tradeReturn,
+                2
+              )}`}
+        </div>
+      )}
       {t.open && (
         <p style={{ ...ui.muted, marginTop: 12 }}>
           La operación sigue abierta: el precio de venta todavía no existe, así que el retorno usa el último precio
