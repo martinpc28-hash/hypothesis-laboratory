@@ -115,13 +115,26 @@ export default function VixTimingTab({ setStatus }) {
 }
 
 function VixTimingResult({ result }) {
-  const { meta, stats, cumulative, msciWorldAvailable, trades, tradesCount, daysInEquity, daysInCash, pctTimeInEquity } =
-    result;
+  const {
+    meta,
+    stats,
+    cumulative,
+    msciWorldAvailable,
+    sp500HedgedAvailable,
+    trades,
+    tradesCount,
+    daysInEquity,
+    daysInCash,
+    pctTimeInEquity,
+  } = result;
   const [tradeAudit, setTradeAudit] = useState(null);
 
   const series = [
     { key: "cumulativeStrategy", label: "VIX timing", color: colors.success },
     { key: "cumulativeSp500", label: "S&P 500 buy & hold", color: colors.primary },
+    ...(sp500HedgedAvailable
+      ? [{ key: "cumulativeSp500Hedged", label: "S&P 500 EUR hedged (sintético)", color: colors.primaryDark }]
+      : []),
     ...(msciWorldAvailable ? [{ key: "cumulativeMsciWorld", label: "MSCI World buy & hold", color: colors.warning }] : []),
   ];
 
@@ -159,6 +172,15 @@ function VixTimingResult({ result }) {
                 <td style={ui.td}>{pct(stats.sp500.volatility)}</td>
                 <td style={ui.td}>{pct(stats.sp500.maxDrawdown)}</td>
               </tr>
+              {sp500HedgedAvailable && (
+                <tr>
+                  <td style={ui.td}>S&amp;P 500 EUR hedged (sintético)</td>
+                  <td style={ui.td}>{pct(stats.sp500Hedged.totalReturn)}</td>
+                  <td style={ui.td}>{pct(stats.sp500Hedged.cagr)}</td>
+                  <td style={ui.td}>{pct(stats.sp500Hedged.volatility)}</td>
+                  <td style={ui.td}>{pct(stats.sp500Hedged.maxDrawdown)}</td>
+                </tr>
+              )}
               {msciWorldAvailable && (
                 <tr>
                   <td style={ui.td}>MSCI World buy &amp; hold</td>
@@ -171,6 +193,13 @@ function VixTimingResult({ result }) {
             </tbody>
           </table>
         </div>
+        {sp500HedgedAvailable && (
+          <p style={ui.muted}>
+            "EUR hedged (sintético)" no es un producto cotizado — no existe una serie gratuita de S&amp;P 500 EUR
+            hedged hasta 2000 — sino el retorno en USD ajustado por el diferencial de tasas Euríbor/T-Bill (paridad
+            de tasas cubierta), la misma metodología que usan los ETFs hedged reales.
+          </p>
+        )}
         {!msciWorldAvailable && (
           <p style={ui.muted}>MSCI World (URTH) no cubre todo el rango elegido, así que se omite de la comparación.</p>
         )}

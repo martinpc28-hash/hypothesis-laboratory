@@ -67,9 +67,14 @@ public class VixTimingService {
 
         String cashSeriesId = currency.equals("EUR") ? EUR_CASH_SERIES : USD_CASH_SERIES;
         String cashSeriesName = currency.equals("EUR") ? EUR_CASH_NAME : USD_CASH_NAME;
+        boolean includeHedged = currency.equals("EUR");
 
         NavigableMap<LocalDate, BigDecimal> vix = (NavigableMap<LocalDate, BigDecimal>) fredClient.fetchSeries("VIXCLS");
         NavigableMap<LocalDate, BigDecimal> cashRate = (NavigableMap<LocalDate, BigDecimal>) fredClient.fetchSeries(cashSeriesId);
+        // Fetched even outside EUR mode's own cash leg: needed for the synthetic EUR-hedged S&P
+        // 500 comparison line (covered interest rate parity needs BOTH legs' short rates).
+        NavigableMap<LocalDate, BigDecimal> usdRateForHedge = includeHedged
+                ? (NavigableMap<LocalDate, BigDecimal>) fredClient.fetchSeries(USD_CASH_SERIES) : null;
         NavigableMap<LocalDate, BigDecimal> spy = yahooFinanceService.fetchDailyCloses("SPY");
         NavigableMap<LocalDate, BigDecimal> urth = yahooFinanceService.fetchDailyCloses("URTH");
         NavigableMap<LocalDate, BigDecimal> usdPerEur = currency.equals("EUR")
@@ -93,9 +98,11 @@ public class VixTimingService {
         double strategyWealth = 1.0, strategyPeak = 1.0, strategyMaxDD = 0.0;
         double sp500Wealth = 1.0, sp500Peak = 1.0, sp500MaxDD = 0.0;
         double msciWealth = 1.0, msciPeak = 1.0, msciMaxDD = 0.0;
+        double sp500HedgedWealth = 1.0, sp500HedgedPeak = 1.0, sp500HedgedMaxDD = 0.0;
         List<Double> strategyDaily = new ArrayList<>();
         List<Double> sp500Daily = new ArrayList<>();
         List<Double> msciDaily = new ArrayList<>();
+        List<Double> sp500HedgedDaily = new ArrayList<>();
         int daysInEquity = 0, daysInCash = 0;
 
         Map<Integer, Map<String, Object>> cumulativeByYear = new LinkedHashMap<>();
@@ -138,10 +145,25 @@ public class VixTimingService {
                 }
             }
 
+            if (includeHedged) {
+                // Synthetic EUR-hedged S&P 500: covered interest rate parity — the USD leg's
+                // return, with the EUR/USD FX move replaced by the (rolling) forward-hedging
+                // cost implied by the two currencies' short rates, instead of the real spot move
+                // fxAdjust uses. This is the standard approximation currency-hedged UCITS ETFs
+                // themselves use (rolled 1-3 month forwards), not a real quoted product — there
+                // is no free EUR-hedged S&P 500 data source going back to 2000.
+                double hedgedRet = (1.0 + sp500Ret) * (1.0 + cashReturn(cashRate, prevDay, day)) / (1.0 + cashReturn(usdRateForHedge, prevDay, day)) - 1.0;
+                sp500HedgedWealth *= 1.0 + hedgedRet;
+                sp500HedgedPeak = Math.max(sp500HedgedPeak, sp500HedgedWealth);
+                sp500HedgedMaxDD = Math.min(sp500HedgedMaxDD, (sp500HedgedWealth - sp500HedgedPeak) / sp500HedgedPeak);
+                sp500HedgedDaily.add(hedgedRet);
+            }
+
             Map<String, Object> yearPoint = cumulativeByYear.computeIfAbsent(day.getYear(), y -> new LinkedHashMap<>(Map.of("year", y)));
             yearPoint.put("cumulativeStrategy", strategyWealth - 1.0);
             yearPoint.put("cumulativeSp500", sp500Wealth - 1.0);
             if (includeMsciWorld) yearPoint.put("cumulativeMsciWorld", msciWealth - 1.0);
+            if (includeHedged) yearPoint.put("cumulativeSp500Hedged", sp500HedgedWealth - 1.0);
 
             // Position for the NEXT day is decided from TODAY's now-known close.
             Double vixToday = floorValue(vix, day);
@@ -173,11 +195,13 @@ public class VixTimingService {
 
         result.put("cumulative", cumulativeByYear.values().stream().toList());
         result.put("msciWorldAvailable", includeMsciWorld);
+        result.put("sp500HedgedAvailable", includeHedged);
 
         Map<String, Object> stats = new LinkedHashMap<>();
         stats.put("strategy", statBlock(strategyWealth, strategyMaxDD, strategyDaily, yearsElapsed));
         stats.put("sp500", statBlock(sp500Wealth, sp500MaxDD, sp500Daily, yearsElapsed));
         if (includeMsciWorld) stats.put("msciWorld", statBlock(msciWealth, msciMaxDD, msciDaily, yearsElapsed));
+        if (includeHedged) stats.put("sp500Hedged", statBlock(sp500HedgedWealth, sp500HedgedMaxDD, sp500HedgedDaily, yearsElapsed));
         result.put("stats", stats);
 
         result.put("trades", trades);
