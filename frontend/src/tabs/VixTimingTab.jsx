@@ -7,6 +7,17 @@ const CURRENT_YEAR = new Date().getFullYear();
 const DEFAULT_YEAR_FROM = 2000;
 const DEFAULT_YEAR_TO = CURRENT_YEAR;
 
+// Combinaciones encontradas al barrer el grid entrada/salida sobre 2000-2026 (ver análisis en
+// chat): las primeras 4 le ganan al buy & hold en CAGR; 30/15 es el punto de partida original.
+const VIX_PRESETS = [
+  { enter: 30, exit: 15, label: "30 / 15", note: "Original" },
+  { enter: 35, exit: 10, label: "35 / 10", note: "Mejor CAGR y vol" },
+  { enter: 40, exit: 10, label: "40 / 10", note: "Mejor drawdown" },
+  { enter: 35, exit: 12, label: "35 / 12", note: "Balanceado" },
+  { enter: 35, exit: 13, label: "35 / 13", note: "" },
+  { enter: 32, exit: 20, label: "32 / 20", note: "Menos tiempo invertido" },
+];
+
 function pct(v, digits = 1) {
   return v === null || v === undefined || Number.isNaN(v) ? "—" : `${(v * 100).toFixed(digits)}%`;
 }
@@ -16,13 +27,15 @@ export default function VixTimingTab({ setStatus }) {
   const [yearTo, setYearTo] = useState(DEFAULT_YEAR_TO);
   const [cashRatePct, setCashRatePct] = useState(3);
   const [currency, setCurrency] = useState("USD");
+  const [enterVix, setEnterVix] = useState(VIX_PRESETS[0].enter);
+  const [exitVix, setExitVix] = useState(VIX_PRESETS[0].exit);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
 
   async function run() {
     setLoading(true);
     try {
-      const body = { yearFrom, yearTo, cashAnnualRate: cashRatePct / 100, currency };
+      const body = { yearFrom, yearTo, cashAnnualRate: cashRatePct / 100, currency, enterVix, exitVix };
       const res = await api.runVixTimingBacktest(body);
       setResult(res);
     } catch (e) {
@@ -37,10 +50,34 @@ export default function VixTimingTab({ setStatus }) {
       <div style={ui.card}>
         <h2 style={ui.cardTitle}>VIX Timing</h2>
         <p style={ui.cardSubtitle}>
-          Se mantiene el dinero en un monetario hasta que el VIX (CBOE, vía FRED VIXCLS) cierra en 30 o más — ahí se
-          pasa 100% a S&amp;P 500 — y se vuelve al monetario cuando el VIX cierra en 15 o menos. La decisión de cada
-          día usa el cierre del día anterior, nunca el del mismo día.
+          Se mantiene el dinero en un monetario hasta que el VIX (CBOE, vía FRED VIXCLS) cierra en {enterVix} o más —
+          ahí se pasa 100% a S&amp;P 500 — y se vuelve al monetario cuando el VIX cierra en {exitVix} o menos. La
+          decisión de cada día usa el cierre del día anterior, nunca el del mismo día.
         </p>
+
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ ...ui.label, marginBottom: 8 }}>Entrada / salida del VIX</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {VIX_PRESETS.map((p) => {
+              const active = p.enter === enterVix && p.exit === exitVix;
+              return (
+                <button
+                  key={`${p.enter}-${p.exit}`}
+                  style={ui.button(active ? "primary" : "secondary")}
+                  onClick={() => {
+                    setEnterVix(p.enter);
+                    setExitVix(p.exit);
+                  }}
+                  title={p.note || undefined}
+                >
+                  {p.label}
+                  {p.note && <span style={{ opacity: 0.75, fontWeight: 400 }}>&nbsp;· {p.note}</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <div style={ui.form}>
           <label style={ui.label}>
             Año desde

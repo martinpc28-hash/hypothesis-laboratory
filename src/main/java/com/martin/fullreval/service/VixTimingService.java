@@ -28,8 +28,6 @@ import java.util.NavigableMap;
 @Service
 public class VixTimingService {
 
-    private static final double ENTER_VIX = 30.0;
-    private static final double EXIT_VIX = 15.0;
     private static final int TRADING_DAYS_PER_YEAR = 252;
 
     private final FredClient fredClient;
@@ -52,6 +50,11 @@ public class VixTimingService {
             throw new IllegalArgumentException("currency must be USD or EUR");
         }
         double cashAnnualRate = req.cashAnnualRate;
+        double enterVix = req.enterVix;
+        double exitVix = req.exitVix;
+        if (exitVix >= enterVix) {
+            throw new IllegalArgumentException("exitVix must be lower than enterVix");
+        }
 
         NavigableMap<LocalDate, BigDecimal> vix = (NavigableMap<LocalDate, BigDecimal>) fredClient.fetchSeries("VIXCLS");
         NavigableMap<LocalDate, BigDecimal> spy = yahooFinanceService.fetchDailyCloses("SPY");
@@ -72,7 +75,7 @@ public class VixTimingService {
 
         boolean inEquity = false;
         Double vix0 = floorValue(vix, tradingDays.get(0));
-        if (vix0 != null && vix0 >= ENTER_VIX) inEquity = true;
+        if (vix0 != null && vix0 >= enterVix) inEquity = true;
 
         double strategyWealth = 1.0, strategyPeak = 1.0, strategyMaxDD = 0.0;
         double sp500Wealth = 1.0, sp500Peak = 1.0, sp500MaxDD = 0.0;
@@ -131,13 +134,13 @@ public class VixTimingService {
             // Position for the NEXT day is decided from TODAY's now-known close.
             Double vixToday = floorValue(vix, day);
             if (vixToday != null) {
-                if (!inEquity && vixToday >= ENTER_VIX) {
+                if (!inEquity && vixToday >= enterVix) {
                     inEquity = true;
                     tradeMultiplier = 1.0;
                     openTrade = new LinkedHashMap<>();
                     openTrade.put("entryDate", day.toString());
                     openTrade.put("vixAtEntry", vixToday);
-                } else if (inEquity && vixToday <= EXIT_VIX) {
+                } else if (inEquity && vixToday <= exitVix) {
                     inEquity = false;
                     if (openTrade != null) {
                         openTrade.put("exitDate", day.toString());
@@ -166,8 +169,8 @@ public class VixTimingService {
         meta.put("yearTo", req.yearTo);
         meta.put("currency", currency);
         meta.put("cashAnnualRate", cashAnnualRate);
-        meta.put("enterVix", ENTER_VIX);
-        meta.put("exitVix", EXIT_VIX);
+        meta.put("enterVix", enterVix);
+        meta.put("exitVix", exitVix);
         meta.put("tradingDays", tradingDays.size());
         result.put("meta", meta);
 
