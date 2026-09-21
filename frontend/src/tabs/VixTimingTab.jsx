@@ -2,6 +2,15 @@ import { useState } from "react";
 import { api } from "../api.js";
 import { ui, colors } from "../theme.js";
 import LineChart from "../LineChart.jsx";
+import { Drawer } from "../AuditPanel.jsx";
+
+const auditableCell = {
+  cursor: "pointer",
+  textDecoration: "underline",
+  textDecorationStyle: "dotted",
+  textDecorationColor: colors.border,
+  textUnderlineOffset: 3,
+};
 
 const CURRENT_YEAR = new Date().getFullYear();
 const DEFAULT_YEAR_FROM = 2000;
@@ -118,6 +127,7 @@ export default function VixTimingTab({ setStatus }) {
 function VixTimingResult({ result }) {
   const { meta, stats, cumulative, msciWorldAvailable, trades, tradesCount, daysInEquity, daysInCash, pctTimeInEquity } =
     result;
+  const [tradeAudit, setTradeAudit] = useState(null);
 
   const series = [
     { key: "cumulativeStrategy", label: "VIX timing", color: colors.success },
@@ -220,7 +230,9 @@ function VixTimingResult({ result }) {
                     <td style={ui.td}>{t.vixAtEntry?.toFixed(1)}</td>
                     <td style={ui.td}>{t.open ? "Abierta (aún en S&P 500)" : t.exitDate}</td>
                     <td style={ui.td}>{t.open ? "—" : t.vixAtExit?.toFixed(1)}</td>
-                    <td style={ui.td}>{pct(t.tradeReturn)}</td>
+                    <td style={{ ...ui.td, ...auditableCell }} onClick={() => setTradeAudit({ trade: t, currency: meta.currency })}>
+                      {pct(t.tradeReturn)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -228,6 +240,91 @@ function VixTimingResult({ result }) {
           </div>
         )}
       </div>
+
+      {tradeAudit && <TradeAuditDrawer detail={tradeAudit} onClose={() => setTradeAudit(null)} />}
     </>
+  );
+}
+
+function formatDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function formatPrice(v) {
+  return v === null || v === undefined ? "—" : `$${Number(v).toFixed(2)}`;
+}
+
+function TradeAuditDrawer({ detail, onClose }) {
+  const { trade: t, currency } = detail;
+  const isEur = currency === "EUR";
+  const exitLabel = t.open ? "Precio actual (operación abierta)" : "Fecha / precio de venta";
+  const exitDate = t.open ? t.asOfDate : t.exitDate;
+  const exitPrice = t.open ? t.asOfPrice : t.exitPrice;
+  const fxExit = t.open ? t.fxAsOf : t.fxAtExit;
+
+  return (
+    <Drawer
+      kicker="Auditoría de la operación"
+      title="Precios de compra y venta (SPY)"
+      subtitle={`VIX ${t.vixAtEntry?.toFixed(1)} en la entrada${t.open ? "" : ` · VIX ${t.vixAtExit?.toFixed(1)} en la salida`}`}
+      onClose={onClose}
+    >
+      <table style={{ width: "100%", fontSize: 12.5, borderCollapse: "collapse" }}>
+        <tbody>
+          <tr>
+            <td style={{ padding: "3px 0", color: colors.textMuted, width: "45%" }}>Fecha / precio de compra</td>
+            <td style={{ padding: "3px 0", textAlign: "right" }}>
+              {formatDate(t.entryDate)} · <strong>{formatPrice(t.entryPrice)}</strong>
+            </td>
+          </tr>
+          <tr>
+            <td style={{ padding: "3px 0", color: colors.textMuted }}>{exitLabel}</td>
+            <td style={{ padding: "3px 0", textAlign: "right" }}>
+              {formatDate(exitDate)} · <strong>{formatPrice(exitPrice)}</strong>
+            </td>
+          </tr>
+          {isEur && (
+            <>
+              <tr>
+                <td style={{ padding: "3px 0", color: colors.textMuted }}>USD/EUR en la compra</td>
+                <td style={{ padding: "3px 0", textAlign: "right" }}>{t.fxAtEntry?.toFixed(4) ?? "—"}</td>
+              </tr>
+              <tr>
+                <td style={{ padding: "3px 0", color: colors.textMuted }}>USD/EUR {t.open ? "actual" : "en la venta"}</td>
+                <td style={{ padding: "3px 0", textAlign: "right" }}>{fxExit?.toFixed(4) ?? "—"}</td>
+              </tr>
+            </>
+          )}
+        </tbody>
+      </table>
+      <div
+        style={{
+          marginTop: 10,
+          paddingTop: 10,
+          borderTop: `1px dashed ${colors.border}`,
+          fontSize: 12.5,
+          fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+          color: colors.textMuted,
+        }}
+      >
+        {isEur
+          ? `(fx compra / fx venta) × (1 + (${formatPrice(exitPrice)} − ${formatPrice(t.entryPrice)}) / ${formatPrice(
+              t.entryPrice
+            )}) − 1 = ${pct(t.tradeReturn, 2)}`
+          : `(${formatPrice(exitPrice)} − ${formatPrice(t.entryPrice)}) / ${formatPrice(t.entryPrice)} = ${pct(
+              t.tradeReturn,
+              2
+            )}`}
+      </div>
+      {t.open && (
+        <p style={{ ...ui.muted, marginTop: 12 }}>
+          La operación sigue abierta: el precio de venta todavía no existe, así que el retorno usa el último precio
+          disponible ({formatDate(t.asOfDate)}).
+        </p>
+      )}
+    </Drawer>
   );
 }

@@ -93,6 +93,8 @@ public class VixTimingService {
             openTrade = new LinkedHashMap<>();
             openTrade.put("entryDate", tradingDays.get(0).toString());
             openTrade.put("vixAtEntry", vix0);
+            openTrade.put("entryPrice", spy.get(tradingDays.get(0)).doubleValue());
+            if (currency.equals("EUR")) openTrade.put("fxAtEntry", floorValue(usdPerEur, tradingDays.get(0)));
         }
 
         for (int i = 1; i < tradingDays.size(); i++) {
@@ -140,11 +142,15 @@ public class VixTimingService {
                     openTrade = new LinkedHashMap<>();
                     openTrade.put("entryDate", day.toString());
                     openTrade.put("vixAtEntry", vixToday);
+                    openTrade.put("entryPrice", spy.get(day).doubleValue());
+                    if (currency.equals("EUR")) openTrade.put("fxAtEntry", floorValue(usdPerEur, day));
                 } else if (inEquity && vixToday <= exitVix) {
                     inEquity = false;
                     if (openTrade != null) {
                         openTrade.put("exitDate", day.toString());
                         openTrade.put("vixAtExit", vixToday);
+                        openTrade.put("exitPrice", spy.get(day).doubleValue());
+                        if (currency.equals("EUR")) openTrade.put("fxAtExit", floorValue(usdPerEur, day));
                         openTrade.put("tradeReturn", tradeMultiplier - 1.0);
                         openTrade.put("open", false);
                         trades.add(openTrade);
@@ -154,8 +160,12 @@ public class VixTimingService {
             }
         }
         if (openTrade != null) {
+            LocalDate asOfDate = tradingDays.get(tradingDays.size() - 1);
             openTrade.put("exitDate", null);
             openTrade.put("vixAtExit", null);
+            openTrade.put("asOfDate", asOfDate.toString());
+            openTrade.put("asOfPrice", spy.get(asOfDate).doubleValue());
+            if (currency.equals("EUR")) openTrade.put("fxAsOf", floorValue(usdPerEur, asOfDate));
             openTrade.put("tradeReturn", tradeMultiplier - 1.0);
             openTrade.put("open", true);
             trades.add(openTrade);
