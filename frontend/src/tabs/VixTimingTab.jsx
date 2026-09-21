@@ -34,7 +34,6 @@ function pct(v, digits = 1) {
 export default function VixTimingTab({ setStatus }) {
   const [yearFrom, setYearFrom] = useState(DEFAULT_YEAR_FROM);
   const [yearTo, setYearTo] = useState(DEFAULT_YEAR_TO);
-  const [cashRatePct, setCashRatePct] = useState(3);
   const [currency, setCurrency] = useState("USD");
   const [enterVix, setEnterVix] = useState(VIX_PRESETS[0].enter);
   const [exitVix, setExitVix] = useState(VIX_PRESETS[0].exit);
@@ -44,7 +43,7 @@ export default function VixTimingTab({ setStatus }) {
   async function run() {
     setLoading(true);
     try {
-      const body = { yearFrom, yearTo, cashAnnualRate: cashRatePct / 100, currency, enterVix, exitVix };
+      const body = { yearFrom, yearTo, currency, enterVix, exitVix };
       const res = await api.runVixTimingBacktest(body);
       setResult(res);
     } catch (e) {
@@ -59,7 +58,8 @@ export default function VixTimingTab({ setStatus }) {
       <div style={ui.card}>
         <h2 style={ui.cardTitle}>VIX Timing</h2>
         <p style={ui.cardSubtitle}>
-          Se mantiene el dinero en un monetario hasta que el VIX (CBOE, vía FRED VIXCLS) cierra en {enterVix} o más —
+          Se mantiene el dinero en un monetario real (letra del Tesoro a 3 meses en USD, o depósito
+          interbancario Euríbor 3M en EUR) hasta que el VIX (CBOE, vía FRED VIXCLS) cierra en {enterVix} o más —
           ahí se pasa 100% a S&amp;P 500 — y se vuelve al monetario cuando el VIX cierra en {exitVix} o menos. La
           decisión de cada día usa el cierre del día anterior, nunca el del mismo día.
         </p>
@@ -97,20 +97,10 @@ export default function VixTimingTab({ setStatus }) {
             <input style={ui.input} type="number" value={yearTo} onChange={(e) => setYearTo(Number(e.target.value))} />
           </label>
           <label style={ui.label}>
-            Tasa del monetario (anual %)
-            <input
-              style={ui.input}
-              type="number"
-              step="0.1"
-              value={cashRatePct}
-              onChange={(e) => setCashRatePct(Number(e.target.value))}
-            />
-          </label>
-          <label style={ui.label}>
-            Moneda
+            Moneda / monetario
             <select style={ui.input} value={currency} onChange={(e) => setCurrency(e.target.value)}>
-              <option value="USD">USD</option>
-              <option value="EUR">EUR</option>
+              <option value="USD">USD — Letra del Tesoro 3M</option>
+              <option value="EUR">EUR — Euríbor 3M interbancario</option>
             </select>
           </label>
           <button style={ui.button("primary")} onClick={run} disabled={loading}>
@@ -140,7 +130,7 @@ function VixTimingResult({ result }) {
       <div style={ui.card}>
         <h3 style={ui.cardTitle}>Resultados {meta.yearFrom}–{meta.yearTo}</h3>
         <p style={ui.cardSubtitle}>
-          Monetario al {(meta.cashAnnualRate * 100).toFixed(1)}% anual en {meta.currency} · entra en S&amp;P 500 con
+          Monetario en {meta.currency} ({meta.cashSeriesName}, FRED {meta.cashSeriesId}) · entra en S&amp;P 500 con
           VIX ≥ {meta.enterVix} · sale con VIX ≤ {meta.exitVix}
         </p>
         <div style={ui.tableScroll}>
@@ -186,7 +176,7 @@ function VixTimingResult({ result }) {
         )}
         <div style={{ ...ui.statGrid, marginTop: 16 }}>
           <div style={ui.statCard}>
-            <div style={ui.statLabel}>Operaciones (entradas)</div>
+            <div style={ui.statLabel}>Operaciones en S&amp;P 500</div>
             <div style={ui.statValue}>{tradesCount}</div>
           </div>
           <div style={ui.statCard}>
@@ -209,36 +199,42 @@ function VixTimingResult({ result }) {
 
       <div style={ui.card}>
         <h3 style={ui.cardTitle}>Operaciones</h3>
-        {trades.length === 0 ? (
-          <div style={ui.emptyState}>El VIX nunca llegó a {meta.enterVix} en este rango — nunca entró al mercado.</div>
-        ) : (
-          <div style={ui.tableScroll}>
-            <table style={ui.table}>
-              <thead>
-                <tr>
-                  <th style={ui.th}>Entrada</th>
-                  <th style={ui.th}>VIX entrada</th>
-                  <th style={ui.th}>Salida</th>
-                  <th style={ui.th}>VIX salida</th>
-                  <th style={ui.th}>Retorno de la operación</th>
+        <p style={ui.cardSubtitle}>
+          Incluye los tramos en S&amp;P 500 y los tramos en el monetario ({meta.cashSeriesName}) — juntos cubren
+          todo el rango elegido.
+        </p>
+        <div style={ui.tableScroll}>
+          <table style={ui.table}>
+            <thead>
+              <tr>
+                <th style={ui.th}>Tipo</th>
+                <th style={ui.th}>Entrada</th>
+                <th style={ui.th}>VIX entrada</th>
+                <th style={ui.th}>Salida</th>
+                <th style={ui.th}>VIX salida</th>
+                <th style={ui.th}>Retorno del tramo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {trades.map((t, i) => (
+                <tr key={i}>
+                  <td style={ui.td}>
+                    <span style={ui.badge(t.type === "EQUITY" ? "primary" : "neutral")}>
+                      {t.type === "EQUITY" ? "S&P 500" : `Monetario ${meta.currency}`}
+                    </span>
+                  </td>
+                  <td style={ui.td}>{t.entryDate}</td>
+                  <td style={ui.td}>{t.vixAtEntry?.toFixed(1) ?? "—"}</td>
+                  <td style={ui.td}>{t.open ? "Abierta (sigue hoy)" : t.exitDate}</td>
+                  <td style={ui.td}>{t.open ? "—" : t.vixAtExit?.toFixed(1) ?? "—"}</td>
+                  <td style={{ ...ui.td, ...auditableCell }} onClick={() => setTradeAudit({ trade: t, currency: meta.currency })}>
+                    {pct(t.tradeReturn)}
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {trades.map((t, i) => (
-                  <tr key={i}>
-                    <td style={ui.td}>{t.entryDate}</td>
-                    <td style={ui.td}>{t.vixAtEntry?.toFixed(1)}</td>
-                    <td style={ui.td}>{t.open ? "Abierta (aún en S&P 500)" : t.exitDate}</td>
-                    <td style={ui.td}>{t.open ? "—" : t.vixAtExit?.toFixed(1)}</td>
-                    <td style={{ ...ui.td, ...auditableCell }} onClick={() => setTradeAudit({ trade: t, currency: meta.currency })}>
-                      {pct(t.tradeReturn)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {tradeAudit && <TradeAuditDrawer detail={tradeAudit} onClose={() => setTradeAudit(null)} />}
@@ -257,8 +253,17 @@ function formatPrice(v) {
   return v === null || v === undefined ? "—" : `$${Number(v).toFixed(2)}`;
 }
 
+function formatRate(v) {
+  return v === null || v === undefined ? "—" : `${Number(v).toFixed(2)}%`;
+}
+
 function TradeAuditDrawer({ detail, onClose }) {
   const { trade: t, currency } = detail;
+  if (t.type === "EQUITY") return <EquityAuditDrawer t={t} currency={currency} onClose={onClose} />;
+  return <CashAuditDrawer t={t} currency={currency} onClose={onClose} />;
+}
+
+function EquityAuditDrawer({ t, currency, onClose }) {
   const isEur = currency === "EUR";
   const exitLabel = t.open ? "Precio actual (operación abierta)" : "Fecha / precio de venta";
   const exitDate = t.open ? t.asOfDate : t.exitDate;
@@ -267,7 +272,7 @@ function TradeAuditDrawer({ detail, onClose }) {
 
   return (
     <Drawer
-      kicker="Auditoría de la operación"
+      kicker="Auditoría del tramo"
       title="Precios de compra y venta (SPY)"
       subtitle={`VIX ${t.vixAtEntry?.toFixed(1)} en la entrada${t.open ? "" : ` · VIX ${t.vixAtExit?.toFixed(1)} en la salida`}`}
       onClose={onClose}
@@ -323,6 +328,50 @@ function TradeAuditDrawer({ detail, onClose }) {
         <p style={{ ...ui.muted, marginTop: 12 }}>
           La operación sigue abierta: el precio de venta todavía no existe, así que el retorno usa el último precio
           disponible ({formatDate(t.asOfDate)}).
+        </p>
+      )}
+    </Drawer>
+  );
+}
+
+function CashAuditDrawer({ t, currency, onClose }) {
+  const exitLabel = t.open ? "Tasa actual (tramo abierto)" : "Fecha / tasa a la salida";
+  const exitDate = t.open ? t.asOfDate : t.exitDate;
+  const exitRate = t.open ? t.asOfRate : t.exitRate;
+  const seriesName = currency === "EUR" ? "Euríbor 3M interbancario (zona euro)" : "Letra del Tesoro de EE. UU. a 3 meses";
+  const seriesId = currency === "EUR" ? "IR3TIB01EZM156N" : "DTB3";
+
+  return (
+    <Drawer
+      kicker="Auditoría del tramo"
+      title={`Tasa del monetario en ${currency}`}
+      subtitle={`${seriesName} · FRED ${seriesId}`}
+      onClose={onClose}
+    >
+      <table style={{ width: "100%", fontSize: 12.5, borderCollapse: "collapse" }}>
+        <tbody>
+          <tr>
+            <td style={{ padding: "3px 0", color: colors.textMuted, width: "45%" }}>Fecha / tasa anual al entrar</td>
+            <td style={{ padding: "3px 0", textAlign: "right" }}>
+              {formatDate(t.entryDate)} · <strong>{formatRate(t.entryRate)}</strong>
+            </td>
+          </tr>
+          <tr>
+            <td style={{ padding: "3px 0", color: colors.textMuted }}>{exitLabel}</td>
+            <td style={{ padding: "3px 0", textAlign: "right" }}>
+              {formatDate(exitDate)} · <strong>{formatRate(exitRate)}</strong>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p style={{ ...ui.muted, marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${colors.border}` }}>
+        El retorno del tramo ({pct(t.tradeReturn, 2)}) es la capitalización día a día de la tasa real publicada cada
+        jornada (nunca la de hoy mismo, siempre la del día hábil anterior) — no una fórmula de un solo paso, porque
+        la tasa varió a lo largo del tramo.
+      </p>
+      {t.open && (
+        <p style={{ ...ui.muted, marginTop: 8 }}>
+          El tramo sigue abierto: usa la tasa más reciente disponible ({formatDate(t.asOfDate)}).
         </p>
       )}
     </Drawer>
