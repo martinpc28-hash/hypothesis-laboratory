@@ -52,4 +52,7 @@ export const api = {
   runSeasonalitySweep: (body) => request(`/api/seasonality/sweep`, postJson(body)),
   runSeasonalityMonteCarlo: (body) => request(`/api/seasonality/montecarlo`, postJson(body)),
   runSeasonalityMacroInsights: (body) => request(`/api/seasonality/macro-insights`, postJson(body)),
+
+  // VIX Timing strategy
+  runVixTimingBacktest: (body) => request(`/api/vix-timing/backtest`, postJson(body)),
 };
