@@ -1114,10 +1114,16 @@ function MacroInsightsResult({ result, strategy, onAudit, onMacroAudit, onEdgeAu
             <tr>
               <th style={ui.th}>Year</th>
               <th style={ui.th}>Edge</th>
-              <th style={ui.th}>Hit</th>
+              <th style={ui.th} title="Whether the RAW signal's own pick beat the universe average — independent of the Macro pick column, which can still be right even when this is a miss (and vice versa).">
+                Hit (signal only)
+              </th>
               {showAssetCols && <th style={ui.th}>Signal pick</th>}
               {showAssetCols && <th style={ui.th}>Winner</th>}
-              {showAssetCols && assetSplit && <th style={ui.th}>Macro pick</th>}
+              {showAssetCols && assetSplit && (
+                <th style={ui.th} title="Colored green when it matches Winner that year, red when it doesn't — check this, not the Hit column, to see if the macro filter would have saved you.">
+                  Macro pick
+                </th>
+              )}
               <th style={ui.th}>Inflation (YoY)</th>
               <th style={ui.th}>Growth (YoY)</th>
               <th style={ui.th}>10Y yield</th>
@@ -1148,7 +1154,7 @@ function MacroInsightsResult({ result, strategy, onAudit, onMacroAudit, onEdgeAu
                   {r.diff >= 0 ? "+" : ""}
                   {pct(r.diff)}
                 </td>
-                <td style={ui.td}>{r.hit ? "✓" : "✕"}</td>
+                <td style={{ ...ui.td, color: r.hit ? colors.success : colors.danger, fontWeight: 700 }}>{r.hit ? "✓" : "✕"}</td>
                 {showAssetCols && (
                   <td
                     style={r.signalPick ? { ...ui.td, ...auditableCell } : ui.td}
