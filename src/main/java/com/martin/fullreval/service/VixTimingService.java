@@ -39,6 +39,9 @@ public class VixTimingService {
      * EUR money-market fund yields (pre-€STR era covered; €STR itself only starts in 2019). */
     private static final String EUR_CASH_SERIES = "IR3TIB01EZM156N";
     private static final String EUR_CASH_NAME = "Euríbor 3 meses interbancario (zona euro)";
+    /** The real MSCI World Standard Index (USD) on Yahoo Finance — daily since 2000 — used instead
+     * of an ETF proxy like URTH (iShares Core MSCI World, only trading since 2012). */
+    private static final String MSCI_WORLD_TICKER = "^990100-USD-STRD";
 
     private final FredClient fredClient;
     private final YahooFinanceService yahooFinanceService;
@@ -79,7 +82,7 @@ public class VixTimingService {
         NavigableMap<LocalDate, BigDecimal> usdRateForHedge = useHedged
                 ? (NavigableMap<LocalDate, BigDecimal>) fredClient.fetchSeries(USD_CASH_SERIES) : null;
         NavigableMap<LocalDate, BigDecimal> spy = yahooFinanceService.fetchDailyCloses("SPY");
-        NavigableMap<LocalDate, BigDecimal> urth = yahooFinanceService.fetchDailyCloses("URTH");
+        NavigableMap<LocalDate, BigDecimal> msciWorld = yahooFinanceService.fetchDailyCloses(MSCI_WORLD_TICKER);
         NavigableMap<LocalDate, BigDecimal> usdPerEur = currency.equals("EUR")
                 ? (NavigableMap<LocalDate, BigDecimal>) fxRateService.getUsdPerLocal("EUR") : null;
 
@@ -92,7 +95,11 @@ public class VixTimingService {
             throw new IllegalStateException("Not enough S&P 500 data for " + req.yearFrom + "-" + req.yearTo);
         }
 
-        boolean includeMsciWorld = !urth.isEmpty() && !urth.firstKey().isAfter(rangeStart);
+        // Compared against the first actual TRADING day in range, not the raw calendar rangeStart
+        // — rangeStart is often a weekend/holiday (e.g. Jan 1st), which would make an index whose
+        // data starts exactly in step with SPY's own trading calendar look "one day short" and
+        // get wrongly excluded.
+        boolean includeMsciWorld = !msciWorld.isEmpty() && !msciWorld.firstKey().isAfter(tradingDays.get(0));
 
         boolean inEquity = false;
         Double vix0 = floorValue(vix, tradingDays.get(0));
@@ -135,9 +142,9 @@ public class VixTimingService {
             sp500Daily.add(sp500RetInCcy);
 
             if (includeMsciWorld) {
-                BigDecimal urthPrev = urth.get(prevDay), urthCur = urth.get(day);
-                if (urthPrev != null && urthCur != null) {
-                    double msciRet = urthCur.subtract(urthPrev).divide(urthPrev, MathContext.DECIMAL64).doubleValue();
+                BigDecimal msciPrev = msciWorld.get(prevDay), msciCur = msciWorld.get(day);
+                if (msciPrev != null && msciCur != null) {
+                    double msciRet = msciCur.subtract(msciPrev).divide(msciPrev, MathContext.DECIMAL64).doubleValue();
                     double msciRetInCcy = currency.equals("EUR") ? fxAdjust(usdPerEur, prevDay, day, msciRet) : msciRet;
                     msciWealth *= 1.0 + msciRetInCcy;
                     msciPeak = Math.max(msciPeak, msciWealth);

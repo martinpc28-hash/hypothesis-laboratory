@@ -10,9 +10,11 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.MathContext;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -110,8 +112,11 @@ public class YahooFinanceService {
         // with margin; period2 is "now".
         long period1 = java.time.LocalDate.of(2000, 1, 1).atStartOfDay(ZoneOffset.UTC).toEpochSecond();
         long period2 = Instant.now().getEpochSecond();
+        // Index tickers (e.g. "^990100-USD-STRD" for MSCI World) contain a leading "^", which
+        // URI.create() rejects unescaped — URL-encode the ticker before it goes in the path.
+        String encodedTicker = URLEncoder.encode(ticker, StandardCharsets.UTF_8);
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(CHART_URL + ticker + "?period1=" + period1 + "&period2=" + period2 + "&interval=1d"))
+                .uri(URI.create(CHART_URL + encodedTicker + "?period1=" + period1 + "&period2=" + period2 + "&interval=1d"))
                 .timeout(TIMEOUT)
                 .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
                 .GET()

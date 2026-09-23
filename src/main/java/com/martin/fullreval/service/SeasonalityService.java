@@ -56,6 +56,12 @@ public class SeasonalityService {
     private static final int PERMUTATION_ITERATIONS = 2000;
     private static final int PERMUTATION_SEED = 42; // reproducible p-values across runs
 
+    /** The real MSCI World Standard Index (USD) on Yahoo Finance — daily since 2000, monthly back
+     * to 1985 — used as the "MSCI World" reference line instead of an ETF proxy like URTH (iShares
+     * Core MSCI World, only trading since 2012). Being the actual index rather than a fund, it has
+     * no expense-ratio drag or tracking error either. */
+    private static final String MSCI_WORLD_TICKER = "^990100-USD-STRD";
+
     private final MarketDataSourceRegistry sourceRegistry;
     private final FxRateService fxRateService;
     private final AssetUniverseService assetUniverseService;
@@ -133,18 +139,18 @@ public class SeasonalityService {
         // what the user picked for their own universe/currency (comparing against "the market"
         // and "the world" only makes sense in one consistent currency). Unlike the strategy/
         // universe series (only invested from the day after the signal window through year-end
-        // — that's the whole point of avoiding look-ahead bias), SPY/URTH here use their FULL
+        // — that's the whole point of avoiding look-ahead bias), SPY/MSCI World here use their FULL
         // calendar-year return: they're a "what if you'd just bought and held the index all
         // along" reference, not a like-for-like same-holding-period comparison. Closes kept
         // around (not just the derived yearly returns) because the daily-return volatility calc
         // below needs the actual price series, not just one number per year.
         NavigableMap<LocalDate, BigDecimal> spyCloses = source.fetchDailyCloses("SPY");
-        NavigableMap<LocalDate, BigDecimal> urthCloses = source.fetchDailyCloses("URTH");
+        NavigableMap<LocalDate, BigDecimal> msciWorldCloses = source.fetchDailyCloses(MSCI_WORLD_TICKER);
         List<Point> sp500Points = new ArrayList<>();
         List<Point> msciWorldPoints = new ArrayList<>();
         for (int year = req.yearFrom; year <= req.yearTo; year++) {
             sp500Points.add(computePoint("SPY", year, spyCloses, req.signalStartMonth, req.signalLengthMonths));
-            msciWorldPoints.add(computePoint("URTH", year, urthCloses, req.signalStartMonth, req.signalLengthMonths));
+            msciWorldPoints.add(computePoint("MSCI World", year, msciWorldCloses, req.signalStartMonth, req.signalLengthMonths));
         }
         Map<Integer, ReturnCalc> sp500FullYear = sp500Points.stream()
                 .filter(p -> p.fullYearValue() != null)
@@ -152,7 +158,7 @@ public class SeasonalityService {
         Map<Integer, ReturnCalc> msciWorldFullYear = msciWorldPoints.stream()
                 .filter(p -> p.fullYearValue() != null)
                 .collect(Collectors.toMap(Point::year, Point::fullYear));
-        result.put("strategy", strategyBacktest(statsPoints, sp500FullYear, msciWorldFullYear, closesByTicker, spyCloses, urthCloses,
+        result.put("strategy", strategyBacktest(statsPoints, sp500FullYear, msciWorldFullYear, closesByTicker, spyCloses, msciWorldCloses,
                 req.signalStartMonth, req.signalLengthMonths));
 
         // S&P 500 signal/rest/full-year returns per year, as a fixed reference row for the
@@ -1405,12 +1411,12 @@ public class SeasonalityService {
 
     /** Equal-weight top-quartile-by-signal portfolio, held for the REST of the year (buying at the end of the
      * signal window, since that's the earliest point the signal is actually known — using the full-year return
-     * here would be look-ahead bias), vs. the equal-weighted full universe over the same holding period. SPY/URTH
-     * are compared using their own FULL calendar-year return instead (see the comment where these maps are built
-     * in runTest) — a "just buy and hold the index" reference, not restricted to the strategy's holding period. */
+     * here would be look-ahead bias), vs. the equal-weighted full universe over the same holding period. SPY/MSCI
+     * World are compared using their own FULL calendar-year return instead (see the comment where these maps are
+     * built in runTest) — a "just buy and hold the index" reference, not restricted to the strategy's holding period. */
     private Map<String, Object> strategyBacktest(List<Point> points, Map<Integer, ReturnCalc> sp500FullYear, Map<Integer, ReturnCalc> msciWorldFullYear,
                                                    Map<String, NavigableMap<LocalDate, BigDecimal>> closesByTicker,
-                                                   NavigableMap<LocalDate, BigDecimal> spyCloses, NavigableMap<LocalDate, BigDecimal> urthCloses,
+                                                   NavigableMap<LocalDate, BigDecimal> spyCloses, NavigableMap<LocalDate, BigDecimal> msciWorldCloses,
                                                    int startMonth, int lengthMonths) {
         Map<Integer, List<Point>> byYear = points.stream()
                 .filter(p -> p.restValue() != null)
@@ -1444,9 +1450,11 @@ public class SeasonalityService {
         perYear.sort(Comparator.comparing(m -> (Integer) m.get("year")));
         List<Integer> years = perYear.stream().map(m -> (Integer) m.get("year")).toList();
 
-        // A benchmark that doesn't cover the WHOLE requested range (e.g. URTH only started
-        // trading in 2012) is dropped entirely rather than shown as a flat 0% line for the
-        // years before it existed — that would misleadingly read as "no return", not "no data".
+        // A benchmark that doesn't cover the WHOLE requested range is dropped entirely rather
+        // than shown as a flat 0% line for the years before it existed — that would misleadingly
+        // read as "no return", not "no data" (matters less now that MSCI World uses the real
+        // index, back to 2000, instead of URTH — an ETF only trading since 2012 — but SPY etc.
+        // can still hit this for a wide-enough yearFrom).
         boolean includeSp500 = years.stream().allMatch(sp500FullYear::containsKey);
         boolean includeMsciWorld = years.stream().allMatch(msciWorldFullYear::containsKey);
 
@@ -1509,11 +1517,11 @@ public class SeasonalityService {
         // startMonth=1, lengthMonths=0 makes buildDailySeries' "hold from the day after the
         // window ends through Dec 31" span the FULL calendar year (window end = Dec 31 of the
         // prior year) — reused here instead of a separate method, matching the full-year
-        // treatment SPY/URTH get everywhere else in this backtest (see sp500FullYear above).
+        // treatment SPY/MSCI World get everywhere else in this backtest (see sp500FullYear above).
         DailySeries sp500Daily = includeSp500
                 ? buildDailySeries(years, y -> List.of("SPY"), Map.of("SPY", spyCloses), 1, 0) : null;
         DailySeries msciDaily = includeMsciWorld
-                ? buildDailySeries(years, y -> List.of("URTH"), Map.of("URTH", urthCloses), 1, 0) : null;
+                ? buildDailySeries(years, y -> List.of(MSCI_WORLD_TICKER), Map.of(MSCI_WORLD_TICKER, msciWorldCloses), 1, 0) : null;
 
         // Per-year max drawdown (running, as of that year-end, but built from real daily
         // closes within each year — not just its closing snapshot) — attached to the SAME
@@ -1553,7 +1561,7 @@ public class SeasonalityService {
 
     /**
      * Builds ONE continuous, chronologically-ordered daily wealth curve for a series (top
-     * quartile for "strategy", the whole covered universe for "benchmark", SPY/URTH for the
+     * quartile for "strategy", the whole covered universe for "benchmark", SPY/MSCI World for the
      * fixed lines) across every year, compounding real daily returns during each year's
      * holding period (day after the signal window ends, through Dec 31). Between one year's
      * holding period and the next year's, wealth is held FLAT — the strategy isn't invested

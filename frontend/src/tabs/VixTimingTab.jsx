@@ -192,7 +192,7 @@ function VixTimingResult({ result }) {
           </p>
         )}
         {!msciWorldAvailable && (
-          <p style={ui.muted}>MSCI World (URTH) no cubre todo el rango elegido, así que se omite de la comparación.</p>
+          <p style={ui.muted}>MSCI World no cubre todo el rango elegido, así que se omite de la comparación.</p>
         )}
         <div style={{ ...ui.statGrid, marginTop: 16 }}>
           <div style={ui.statCard}>
