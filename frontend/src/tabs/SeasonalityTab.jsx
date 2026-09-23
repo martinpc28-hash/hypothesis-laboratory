@@ -71,7 +71,6 @@ export default function SeasonalityTab({ setStatus }) {
   const [macroResult, setMacroResult] = useState(null);
   const [macroLoading, setMacroLoading] = useState(false);
   const [macroAudit, setMacroAudit] = useState(null);
-  const [edgeAudit, setEdgeAudit] = useState(null);
   const [macroPickReason, setMacroPickReason] = useState(null);
 
   // Combinatorial optimizer ("Monte Carlo" per the user's ask) — tries every valid
@@ -446,7 +445,6 @@ export default function SeasonalityTab({ setStatus }) {
           macroLoading={macroLoading}
           onRunMacroInsights={runMacroInsights}
           onMacroAudit={setMacroAudit}
-          onEdgeAudit={setEdgeAudit}
           onMacroPickReason={setMacroPickReason}
         />
       )}
@@ -481,7 +479,6 @@ export default function SeasonalityTab({ setStatus }) {
 
       <AuditPanel audit={audit} onClose={() => setAudit(null)} />
       <MacroAuditDrawer detail={macroAudit} onClose={() => setMacroAudit(null)} />
-      <EdgeAuditDrawer detail={edgeAudit} onClose={() => setEdgeAudit(null)} />
       <MacroPickReasonDrawer detail={macroPickReason} onClose={() => setMacroPickReason(null)} onMacroAudit={setMacroAudit} />
     </div>
   );
@@ -711,7 +708,7 @@ function DiffScoreRow({ perYear, diffKey, cumulative, strategyCumKey, benchmarkC
   );
 }
 
-function TestResults({ result, onAudit, macroResult, macroLoading, onRunMacroInsights, onMacroAudit, onEdgeAudit, onMacroPickReason }) {
+function TestResults({ result, onAudit, macroResult, macroLoading, onRunMacroInsights, onMacroAudit, onMacroPickReason }) {
   const { meta, panel, coverage, correlationVsRest, correlationVsFullYear, persistenceVsRest, persistenceVsFullYear, strategy } = result;
   const tickers = meta.tickers;
 
@@ -967,7 +964,6 @@ function TestResults({ result, onAudit, macroResult, macroLoading, onRunMacroIns
         onRun={onRunMacroInsights}
         onAudit={onAudit}
         onMacroAudit={onMacroAudit}
-        onEdgeAudit={onEdgeAudit}
         onMacroPickReason={onMacroPickReason}
       />
     </div>
@@ -987,7 +983,7 @@ const MACRO_FEATURE_META = {
   vixAverage: { label: "VIX (average during the signal window)", format: (v) => v.toFixed(1) },
 };
 
-function MacroInsightsSection({ tickers, strategy, macroResult, macroLoading, onRun, onAudit, onMacroAudit, onEdgeAudit, onMacroPickReason }) {
+function MacroInsightsSection({ tickers, strategy, macroResult, macroLoading, onRun, onAudit, onMacroAudit, onMacroPickReason }) {
   return (
     <div style={ui.card}>
       <h3 style={ui.cardTitle}>Macro regime context</h3>
@@ -1012,7 +1008,6 @@ function MacroInsightsSection({ tickers, strategy, macroResult, macroLoading, on
           strategy={strategy}
           onAudit={onAudit}
           onMacroAudit={onMacroAudit}
-          onEdgeAudit={onEdgeAudit}
           onMacroPickReason={onMacroPickReason}
         />
       )}
@@ -1048,10 +1043,11 @@ function macroPickFor(row, assetSplit) {
   return tickerAShare >= 0.5 ? assetSplit.tickerA : assetSplit.tickerB;
 }
 
-function MacroInsightsResult({ result, strategy, onAudit, onMacroAudit, onEdgeAudit, onMacroPickReason }) {
+function MacroInsightsResult({ result, strategy, onAudit, onMacroAudit, onMacroPickReason }) {
   const { meta, yearly, edgeSplit, assetSplit, liveRead, macroFilteredStrategy } = result;
   const byKey = (row, feature) => (row.macroAudit ? row.macroAudit[feature] : null);
   const showAssetCols = meta.tickers.length === 2;
+  const macroReturnByYear = new Map((macroFilteredStrategy?.perYear ?? []).map((m) => [m.year, m]));
 
   return (
     <div>
@@ -1113,8 +1109,7 @@ function MacroInsightsResult({ result, strategy, onAudit, onMacroAudit, onEdgeAu
           <thead>
             <tr>
               <th style={ui.th}>Year</th>
-              <th style={ui.th}>Edge</th>
-              <th style={ui.th} title="Whether the RAW signal's own pick beat the universe average — independent of the Macro pick column, which can still be right even when this is a miss (and vice versa).">
+              <th style={ui.th} title="Whether the RAW signal's own pick beat the universe average — independent of the Macro pick/return columns, which can still be right even when this is a miss (and vice versa).">
                 Hit (signal only)
               </th>
               {showAssetCols && <th style={ui.th}>Signal pick</th>}
@@ -1122,6 +1117,11 @@ function MacroInsightsResult({ result, strategy, onAudit, onMacroAudit, onEdgeAu
               {showAssetCols && assetSplit && (
                 <th style={ui.th} title="Colored green when it matches Winner that year, red when it doesn't — check this, not the Hit column, to see if the macro filter would have saved you.">
                   Macro pick
+                </th>
+              )}
+              {showAssetCols && macroFilteredStrategy && (
+                <th style={ui.th} title="The return you'd actually have made that year holding whatever the macro filter picked (always defers to macro on disagreement) — this is the number that reflects the macro filter, unlike Edge/Hit above.">
+                  Macro filter return
                 </th>
               )}
               <th style={ui.th}>Inflation (YoY)</th>
@@ -1139,21 +1139,6 @@ function MacroInsightsResult({ result, strategy, onAudit, onMacroAudit, onEdgeAu
               return (
               <tr key={r.year}>
                 <td style={ui.td}>{r.year}</td>
-                <td
-                  style={{ ...ui.td, ...auditableCell, color: r.diff >= 0 ? colors.success : colors.danger, fontWeight: 700 }}
-                  title="Click to see where this number comes from"
-                  onClick={() =>
-                    onEdgeAudit({
-                      year: r.year,
-                      diff: r.diff,
-                      strategyReturnAudit: r.strategyReturnAudit,
-                      benchmarkReturnAudit: r.benchmarkReturnAudit,
-                    })
-                  }
-                >
-                  {r.diff >= 0 ? "+" : ""}
-                  {pct(r.diff)}
-                </td>
                 <td style={{ ...ui.td, color: r.hit ? colors.success : colors.danger, fontWeight: 700 }}>{r.hit ? "✓" : "✕"}</td>
                 {showAssetCols && (
                   <td
@@ -1205,6 +1190,32 @@ function MacroInsightsResult({ result, strategy, onAudit, onMacroAudit, onEdgeAu
                     {macroPick ?? "—"}
                   </td>
                 )}
+                {showAssetCols && macroFilteredStrategy && (() => {
+                  const macroRow = macroReturnByYear.get(r.year);
+                  return (
+                    <td
+                      style={{
+                        ...ui.td,
+                        ...(macroRow ? auditableCell : null),
+                        color: !macroRow ? colors.textMuted : macroRow.chosenReturn >= 0 ? colors.success : colors.danger,
+                        fontWeight: 700,
+                      }}
+                      title={macroRow ? "Click to see where this number comes from" : undefined}
+                      onClick={
+                        macroRow
+                          ? () =>
+                              onAudit({
+                                title: `Macro filter return · ${r.year}`,
+                                subtitle: `Holds ${macroRow.macroPick} (macro pick) — always defers to macro on disagreement with the signal`,
+                                components: [macroRow.chosenReturnAudit],
+                              })
+                          : undefined
+                      }
+                    >
+                      {macroRow ? `${macroRow.chosenReturn >= 0 ? "+" : ""}${pct(macroRow.chosenReturn)}` : "—"}
+                    </td>
+                  );
+                })()}
                 <td style={ui.td}>
                   <MacroValue
                     value={r.inflationYoY}
@@ -1542,64 +1553,6 @@ function Row({ label, value }) {
       <span style={{ color: colors.textMuted }}>{label}</span>
       <span style={{ fontWeight: 600 }}>{value === null || value === undefined ? "—" : value}</span>
     </div>
-  );
-}
-
-// Audits the yearly table's "Edge" number, which is a DIFFERENCE of two averages (signal's pick
-// vs. the whole covered universe that year) rather than a single average — so instead of the
-// generic AuditPanel (which assumes one number IS the average of its components), this shows
-// both sides' own component breakdown separately, then the subtraction that produces Edge.
-function EdgeAuditDrawer({ detail, onClose }) {
-  if (!detail) return null;
-  const { year, diff, strategyReturnAudit, benchmarkReturnAudit } = detail;
-  const avgOf = (components) =>
-    components && components.length
-      ? components.reduce((sum, c) => sum + (c.value ?? 0), 0) / components.length
-      : null;
-  const strategyAvg = avgOf(strategyReturnAudit);
-  const benchmarkAvg = avgOf(benchmarkReturnAudit);
-
-  return (
-    <Drawer
-      kicker="Edge audit"
-      title={`Edge · ${year}`}
-      subtitle="Signal's pick (rest of year) minus the whole covered universe's average (rest of year)"
-      onClose={onClose}
-    >
-      <div
-        style={{ marginBottom: 8, fontSize: 11, fontWeight: 700, color: colors.primary, textTransform: "uppercase", letterSpacing: 0.4 }}
-      >
-        Signal's pick{strategyReturnAudit && strategyReturnAudit.length > 1 ? " (equal-weighted)" : ""}
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
-        {(strategyReturnAudit || []).map((c, i) => (
-          <ComponentDetail key={`s-${i}`} c={c} />
-        ))}
-      </div>
-
-      <div
-        style={{ marginBottom: 8, fontSize: 11, fontWeight: 700, color: colors.textMuted, textTransform: "uppercase", letterSpacing: 0.4 }}
-      >
-        Whole covered universe (equal-weighted)
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
-        {(benchmarkReturnAudit || []).map((c, i) => (
-          <ComponentDetail key={`b-${i}`} c={c} />
-        ))}
-      </div>
-
-      <div
-        style={{
-          paddingTop: 12,
-          borderTop: `1px dashed ${colors.border}`,
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-          fontSize: 13,
-          color: colors.textMuted,
-        }}
-      >
-        Edge = {pct(strategyAvg)} − {pct(benchmarkAvg)} = {pct(diff)}
-      </div>
-    </Drawer>
   );
 }
 
