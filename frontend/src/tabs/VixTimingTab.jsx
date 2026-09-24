@@ -159,6 +159,12 @@ function VixTimingResult({ result }) {
   const lossYears = yearlyRows.filter((r) => r.diff <= 0);
   const avgWin = winYears.length ? winYears.reduce((a, r) => a + r.diff, 0) / winYears.length : null;
   const avgLoss = lossYears.length ? lossYears.reduce((a, r) => a + r.diff, 0) / lossYears.length : null;
+  const winLossRatio = avgWin !== null && avgLoss ? Math.abs(avgWin / avgLoss) : null;
+  // "Feels calmer day to day" (lower annualized vol, from smaller daily swings while sitting in
+  // cash) is a different claim from "hurts less at the worst moment" (max drawdown, driven by
+  // WHEN the strategy happens to be positioned) — worth calling out because they can disagree.
+  const volLower = stats.strategy.volatility < stats.sp500.volatility;
+  const drawdownWorse = stats.strategy.maxDrawdown < stats.sp500.maxDrawdown;
   const strategyTotalMultiple = 1 + stats.strategy.totalReturn;
   const sp500TotalMultiple = 1 + stats.sp500.totalReturn;
   const totalAlpha = stats.strategy.totalReturn - stats.sp500.totalReturn;
@@ -294,6 +300,33 @@ function VixTimingResult({ result }) {
             <strong style={{ color: colors.danger }}>{avgLoss !== null ? pct(avgLoss) : "—"}</strong>. Perder menos
             años de los que gana no garantiza terminar arriba en dinero si esos años perdidos pesan más — esto es lo
             que realmente decide el resultado.
+          </p>
+          {winLossRatio !== null && (
+            <p style={{ margin: "8px 0 0 0", fontSize: 14 }}>
+              {avgLoss < 0 && avgWin >= 0 && Math.abs(avgLoss) > avgWin ? (
+                <>
+                  Acá la asimetría va al revés que en el filtro macro: cuando esta regla gana, gana por{" "}
+                  {pct(avgWin)}; cuando pierde, pierde por {pct(Math.abs(avgLoss))} —{" "}
+                  <strong>{(1 / winLossRatio).toFixed(1)}x</strong> más grande. Gana la mayoría de los años pero
+                  pierde más en los años que pierde, y esa es la razón concreta por la que termina abajo en dinero.
+                </>
+              ) : (
+                <>
+                  Acá la asimetría favorece a la estrategia, igual que en el filtro macro: gana{" "}
+                  <strong>{winLossRatio.toFixed(1)}x</strong> más de lo que pierde en promedio.
+                </>
+              )}
+            </p>
+          )}
+          <p style={{ margin: "8px 0 0 0", fontSize: 14 }}>
+            La sensación de "más tranquilo" tampoco es la misma cosa que "duele menos": la volatilidad anualizada de
+            esta regla ({pct(stats.strategy.volatility)}) es {volLower ? "menor" : "mayor"} que la de {sp500Label} (
+            {pct(stats.sp500.volatility)}) — se siente {volLower ? "más tranquila" : "más agitada"} día a día,
+            sentada en monetario buena parte del tiempo — pero su máximo drawdown ({pct(stats.strategy.maxDrawdown)})
+            es en realidad {drawdownWorse ? "peor" : "mejor"} que el de {sp500Label} (
+            {pct(stats.sp500.maxDrawdown)}). {drawdownWorse
+              ? "La calma cotidiana no se tradujo en menos dolor en el peor momento — entrar recién cuando el VIX ya está en pánico puede comprar justo antes de la última pierna de baja."
+              : "Aquí sí se tradujo en menos dolor en el peor momento, no solo en menos ruido día a día."}
           </p>
         </div>
 
