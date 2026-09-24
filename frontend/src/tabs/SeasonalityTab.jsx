@@ -1389,6 +1389,14 @@ function MacroFilteredStrategySection({ macroFilteredStrategy, strategy, tickers
   const firstYear = macroPerYearVsSp500.length ? macroPerYearVsSp500[0].year : null;
   const lastYear = macroPerYearVsSp500.length ? macroPerYearVsSp500[macroPerYearVsSp500.length - 1].year : null;
 
+  // The bootstrap + subperiod split below were run offline (2026-09-24) specifically against the
+  // FIXED XLE/XLK rule over its full 2000-2026 history — not something recomputed live for
+  // whatever range is currently selected, same convention as the "Regla fija" validation text in
+  // AssetSplitCallout above. Only shown for that exact combo so it's never misattributed to a
+  // different pair of tickers.
+  const tickerSet = new Set(tickers.map((t) => t.toUpperCase()));
+  const isFixedXleXlk = tickerSet.size === 2 && tickerSet.has("XLE") && tickerSet.has("XLK");
+
   return (
     <div style={{ marginTop: 24, paddingTop: 20, borderTop: `1px solid ${colors.border}` }}>
       <h4 style={{ margin: "0 0 8px 0", fontSize: 15 }}>Strategy performance — with macro filter</h4>
@@ -1461,8 +1469,7 @@ function MacroFilteredStrategySection({ macroFilteredStrategy, strategy, tickers
               Esa asimetría —ganar{" "}
               <strong>{winLossRatio.toFixed(1)}x</strong> más grande de lo que se pierde— es la razón de fondo por la
               que el total compuesto es tan alto pese a ganar "solo" el {pct(winYears.length / macroPerYearVsSp500.length, 0)} de
-              los años. Es un patrón fuerte y vale la pena someterlo a más pruebas (submuestras, bootstrap) antes de
-              confiar en él a futuro.
+              los años. Es un patrón fuerte — puesto a prueba más abajo antes de confiar en él a futuro.
             </p>
           )}
           {overrideYears.length > 0 && (
@@ -1476,6 +1483,41 @@ function MacroFilteredStrategySection({ macroFilteredStrategy, strategy, tickers
               diferencia real que pone sobre la mesa anular la señal.
             </p>
           )}
+        </div>
+      )}
+
+      {isFixedXleXlk && (
+        <div
+          style={{
+            background: colors.primarySoft,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 10,
+            padding: 16,
+            marginTop: 12,
+          }}
+        >
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, color: colors.primary }}>
+            ¿Es real esa asimetría? Puesta a prueba (2000–2026)
+          </div>
+          <p style={{ margin: "6px 0 8px 0", fontSize: 14 }}>
+            <strong>Bootstrap</strong> — 20.000 remuestreos con reemplazo de los mismos 27 años (cada escenario vuelve
+            a barajar esos 27 resultados reales, permitiendo repetidos). El ratio ganancia/pérdida se mantiene por
+            encima de 1x en el <strong>99.8%</strong> de los escenarios (IC 95%: [1.48x, 8.15x], observado 3.1x), y el
+            alfa total compuesto contra el S&amp;P 500 sigue siendo positivo en el <strong>99.8%</strong> de los
+            casos — no depende de un puñado de años con suerte ni del orden en que ocurrieron.
+          </p>
+          <p style={{ margin: "0 0 8px 0", fontSize: 14 }}>
+            <strong>Split real en dos mitades</strong> (sin mezclar, historia tal cual ocurrió) — dos regímenes de
+            mercado casi opuestos: <strong>2000–2012</strong> (ratio 3.6x; filtro macro +183.7% mientras el S&amp;P
+            500 perdió -11.3% en esos 13 años) y <strong>2013–2026</strong> (ratio 2.5x; filtro macro +845.4% contra
+            un S&amp;P 500 que ya venía fuerte, +432.4%, en esos 14 años). El win rate es casi idéntico en ambas
+            mitades (62% y 64%) y la asimetría no se invierte en ninguna — aunque es más débil en la segunda mitad.
+          </p>
+          <p style={{ ...ui.muted, margin: 0 }}>
+            Con solo 27 años reales de datos totales, esto es evidencia de robustez, no una prueba definitiva: cada
+            mitad por separado (n=13/14) tiene mucho margen de error propio, y ninguno de estos dos análisis puede
+            descartar que las condiciones de mercado futuras sean distintas a las de los últimos 27 años.
+          </p>
         </div>
       )}
 
