@@ -142,21 +142,6 @@ public class SeasonalityService {
                 .filter(p -> assetCountByYear.getOrDefault(p.year(), 0L) >= req.minAssetsPerYear)
                 .collect(Collectors.toList());
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("meta", Map.of(
-                "source", source.getDisplayName(),
-                "currency", "LOCAL".equalsIgnoreCase(req.currencyMode) ? "Moneda local" : "USD",
-                "yearFrom", req.yearFrom, "yearTo", req.yearTo,
-                "signalStartMonth", req.signalStartMonth, "signalLengthMonths", req.signalLengthMonths,
-                "tickers", req.tickers
-        ));
-        result.put("panel", allPoints.stream().map(this::pointToMap).toList());
-        result.put("coverage", coverageReport(allPoints, req.tickers, req.yearFrom, req.yearTo, req.minAssetsPerYear));
-        result.put("correlationVsRest", correlationBlock(statsPoints, Point::signalValue, Point::restValue, true));
-        result.put("correlationVsFullYear", correlationBlock(statsPoints, Point::signalValue, Point::fullYearValue, true));
-        result.put("persistenceVsRest", quartilePersistence(statsPoints, Point::restValue));
-        result.put("persistenceVsFullYear", quartilePersistence(statsPoints, Point::fullYearValue));
-
         // Fixed reference lines for the strategy chart — always USD, same source, regardless of
         // what the user picked for their own universe/currency (comparing against "the market"
         // and "the world" only makes sense in one consistent currency). Unlike the strategy/
@@ -165,7 +150,9 @@ public class SeasonalityService {
         // calendar-year return: they're a "what if you'd just bought and held the index all
         // along" reference, not a like-for-like same-holding-period comparison. Closes kept
         // around (not just the derived yearly returns) because the daily-return volatility calc
-        // below needs the actual price series, not just one number per year.
+        // below needs the actual price series, not just one number per year. Computed up here
+        // (rather than right before "strategy" below, where this used to live) because the
+        // excess-over-SPY correlation just below also needs it.
         NavigableMap<LocalDate, BigDecimal> spyCloses = source.fetchDailyCloses("SPY");
         NavigableMap<LocalDate, BigDecimal> msciWorldCloses = source.fetchDailyCloses(MSCI_WORLD_TICKER);
         List<Point> sp500Points = new ArrayList<>();
@@ -180,6 +167,51 @@ public class SeasonalityService {
         Map<Integer, ReturnCalc> msciWorldFullYear = msciWorldPoints.stream()
                 .filter(p -> p.fullYearValue() != null)
                 .collect(Collectors.toMap(Point::year, Point::fullYear));
+        Map<Integer, Double> sp500SignalByYear = sp500Points.stream()
+                .filter(p -> p.signalValue() != null)
+                .collect(Collectors.toMap(Point::year, Point::signalValue));
+        Map<Integer, Double> sp500RestByYear = sp500Points.stream()
+                .filter(p -> p.restValue() != null)
+                .collect(Collectors.toMap(Point::year, Point::restValue));
+
+        // Raw-return correlation conflates two different things: "this asset's early-window
+        // return predicts its own later return" (the thing the hypothesis is actually about) and
+        // "the whole market trended a certain way that year, so every asset's two windows moved
+        // together" (pure beta, nothing to do with picking one asset over another). Subtracting
+        // SPY's own return for the same two windows removes that market-wide component, leaving
+        // each asset's return RELATIVE TO the market — the number that actually matters for a
+        // stock/sector-picking strategy. Kept alongside the raw-return version below rather than
+        // replacing it, since "does the raw signal predict raw future return" is still a
+        // meaningful question in its own right.
+        List<Point> excessStatsPoints = statsPoints.stream()
+                .map(p -> {
+                    Double spySignal = sp500SignalByYear.get(p.year());
+                    Double spyRest = sp500RestByYear.get(p.year());
+                    if (spySignal == null || spyRest == null || p.signalValue() == null || p.restValue() == null) return null;
+                    return new Point(p.ticker(), p.year(),
+                            new ReturnCalc(p.signalValue() - spySignal, null, null, null, null, null, null),
+                            new ReturnCalc(p.restValue() - spyRest, null, null, null, null, null, null),
+                            p.fullYear());
+                })
+                .filter(java.util.Objects::nonNull)
+                .toList();
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("meta", Map.of(
+                "source", source.getDisplayName(),
+                "currency", "LOCAL".equalsIgnoreCase(req.currencyMode) ? "Moneda local" : "USD",
+                "yearFrom", req.yearFrom, "yearTo", req.yearTo,
+                "signalStartMonth", req.signalStartMonth, "signalLengthMonths", req.signalLengthMonths,
+                "tickers", req.tickers
+        ));
+        result.put("panel", allPoints.stream().map(this::pointToMap).toList());
+        result.put("coverage", coverageReport(allPoints, req.tickers, req.yearFrom, req.yearTo, req.minAssetsPerYear));
+        result.put("correlationVsRest", correlationBlock(statsPoints, Point::signalValue, Point::restValue, true));
+        result.put("correlationVsFullYear", correlationBlock(statsPoints, Point::signalValue, Point::fullYearValue, true));
+        result.put("correlationVsRestExcessSp500", correlationBlock(excessStatsPoints, Point::signalValue, Point::restValue, true));
+        result.put("persistenceVsRest", quartilePersistence(statsPoints, Point::restValue));
+        result.put("persistenceVsFullYear", quartilePersistence(statsPoints, Point::fullYearValue));
+
         result.put("strategy", strategyBacktest(statsPoints, sp500FullYear, msciWorldFullYear, closesByTicker, spyCloses, msciWorldCloses,
                 req.signalStartMonth, req.signalLengthMonths));
 
