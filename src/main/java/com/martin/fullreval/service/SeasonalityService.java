@@ -178,23 +178,36 @@ public class SeasonalityService {
         // return predicts its own later return" (the thing the hypothesis is actually about) and
         // "the whole market trended a certain way that year, so every asset's two windows moved
         // together" (pure beta, nothing to do with picking one asset over another). Subtracting
-        // SPY's own return for the same two windows removes that market-wide component, leaving
-        // each asset's return RELATIVE TO the market — the number that actually matters for a
-        // stock/sector-picking strategy. Kept alongside the raw-return version below rather than
-        // replacing it, since "does the raw signal predict raw future return" is still a
-        // meaningful question in its own right.
-        List<Point> excessStatsPoints = statsPoints.stream()
-                .map(p -> {
-                    Double spySignal = sp500SignalByYear.get(p.year());
-                    Double spyRest = sp500RestByYear.get(p.year());
-                    if (spySignal == null || spyRest == null || p.signalValue() == null || p.restValue() == null) return null;
-                    return new Point(p.ticker(), p.year(),
-                            new ReturnCalc(p.signalValue() - spySignal, null, null, null, null, null, null),
-                            new ReturnCalc(p.restValue() - spyRest, null, null, null, null, null, null),
-                            p.fullYear());
-                })
-                .filter(java.util.Objects::nonNull)
-                .toList();
+        // SPY's own return for the same two windows removes that market-wide component.
+        //
+        // Crucially, this has to be done on THE PICK — the top-quartile-by-signal group the
+        // strategy would actually hold that year (same grouping strategyBacktest itself uses;
+        // degenerates to just "the winner" for a 2-ticker universe) — not on every individual
+        // ticker regardless of whether it was ever held. Pooling both the winner AND the loser
+        // every year (as an earlier version of this did) answers "do early and late returns move
+        // together across assets in general", not "does trusting the signal's actual picks work" —
+        // the two can and did give different-looking numbers.
+        Map<Integer, List<Point>> statsPointsByYear = statsPoints.stream().collect(Collectors.groupingBy(Point::year));
+        List<Point> pickExcessPoints = new ArrayList<>();
+        for (Map.Entry<Integer, List<Point>> e : statsPointsByYear.entrySet()) {
+            int year = e.getKey();
+            List<Point> yearPoints = e.getValue();
+            if (yearPoints.size() < 2) continue; // no "top quartile" to speak of with a single asset
+            Double spySignal = sp500SignalByYear.get(year);
+            Double spyRest = sp500RestByYear.get(year);
+            if (spySignal == null || spyRest == null) continue;
+            int quartileSize = (int) Math.ceil(yearPoints.size() / 4.0);
+            List<Point> topQuartile = yearPoints.stream()
+                    .sorted(Comparator.comparingDouble(Point::signalValue).reversed())
+                    .limit(quartileSize)
+                    .toList();
+            double pickSignal = topQuartile.stream().mapToDouble(Point::signalValue).average().orElse(Double.NaN) - spySignal;
+            double pickRest = topQuartile.stream().mapToDouble(Point::restValue).average().orElse(Double.NaN) - spyRest;
+            pickExcessPoints.add(new Point("PICK", year,
+                    new ReturnCalc(pickSignal, null, null, null, null, null, null),
+                    new ReturnCalc(pickRest, null, null, null, null, null, null),
+                    ReturnCalc.empty(null, null)));
+        }
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("meta", Map.of(
@@ -208,7 +221,19 @@ public class SeasonalityService {
         result.put("coverage", coverageReport(allPoints, req.tickers, req.yearFrom, req.yearTo, req.minAssetsPerYear));
         result.put("correlationVsRest", correlationBlock(statsPoints, Point::signalValue, Point::restValue, true));
         result.put("correlationVsFullYear", correlationBlock(statsPoints, Point::signalValue, Point::fullYearValue, true));
-        result.put("correlationVsRestExcessSp500", correlationBlock(excessStatsPoints, Point::signalValue, Point::restValue, true));
+        result.put("correlationVsRestExcessSp500", correlationBlock(pickExcessPoints, Point::signalValue, Point::restValue, true));
+        // The (x, y) pairs correlationVsRestExcessSp500 was computed from — one per year, since
+        // that correlation is now per-year (the pick), not per (ticker, year) — so the UI's
+        // scatter chart can plot exactly what was correlated instead of trying to reconstruct it.
+        result.put("pickVsSp500Panel", pickExcessPoints.stream()
+                .map(p -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("year", p.year());
+                    m.put("signalExcess", p.signalValue());
+                    m.put("restExcess", p.restValue());
+                    return m;
+                })
+                .toList());
         result.put("persistenceVsRest", quartilePersistence(statsPoints, Point::restValue));
         result.put("persistenceVsFullYear", quartilePersistence(statsPoints, Point::fullYearValue));
 

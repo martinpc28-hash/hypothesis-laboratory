@@ -729,19 +729,15 @@ function TestResults({ result, onAudit, macroResult, macroLoading, onRunMacroIns
     .filter((p) => p.signalReturn !== null && p.fullYearReturn !== null && p.covered)
     .map((p) => ({ x: p.signalReturn, y: p.fullYearReturn, label: `${p.ticker} ${p.year}` }));
 
-  // Same pairs as restPoints, but with the S&P 500's own signal/rest-of-year return for that
-  // SAME year subtracted out first — isolates "this asset beat/lagged the market" from "the
-  // whole market moved together that year" (pure beta, unrelated to picking one asset over
-  // another). See correlationVsRestExcessSp500's backend comment for why this matters.
-  const sp500ByYear = new Map((result.sp500Panel || []).map((p) => [p.year, p]));
-  const restPointsExcessSp500 = panel
-    .filter((p) => p.signalReturn !== null && p.restReturn !== null && p.covered)
-    .map((p) => {
-      const spy = sp500ByYear.get(p.year);
-      if (!spy || spy.signalReturn == null || spy.restReturn == null) return null;
-      return { x: p.signalReturn - spy.signalReturn, y: p.restReturn - spy.restReturn, label: `${p.ticker} ${p.year}` };
-    })
-    .filter(Boolean);
+  // One point per YEAR (not per ticker) — the top-quartile-by-signal group the strategy would
+  // actually hold that year (same grouping "Strategy performance" uses), with the S&P 500's own
+  // signal/rest-of-year return for that same year subtracted out of both axes. Isolates "the
+  // pick beat/lagged the market" from "the whole market moved together that year" (pure beta) —
+  // computed backend-side (see correlationVsRestExcessSp500's comment) since it needs the same
+  // quartile grouping the strategy backtest uses, not something reconstructable from the raw panel.
+  const restPointsExcessSp500 = (result.pickVsSp500Panel || [])
+    .filter((p) => p.signalExcess !== null && p.restExcess !== null)
+    .map((p) => ({ x: p.signalExcess, y: p.restExcess, label: `${p.year}` }));
 
   return (
     <div>
@@ -786,18 +782,20 @@ function TestResults({ result, onAudit, macroResult, macroLoading, onRunMacroIns
             yLabel="Full year return"
           />
           <CorrelationBlock
-            title="Signal vs. rest of year (excess over S&P 500)"
+            title="The pick vs. rest of year (excess over S&P 500)"
             corr={correlationVsRestExcessSp500}
             points={restPointsExcessSp500}
-            xLabel="Signal window return − S&P 500"
-            yLabel="Rest of year return − S&P 500"
+            xLabel="Pick's signal window return − S&P 500"
+            yLabel="Pick's rest of year return − S&P 500"
           />
         </div>
         <p style={{ ...ui.muted, marginTop: 8 }}>
-          "Excess over S&P 500" subtracts the S&amp;P 500's own return for that same window before correlating —
-          removes "the whole market moved together that year" (beta) so what's left is whether THIS asset's early
-          return predicts whether it beats or lags the market later, which is the number that actually matters for
-          picking one asset over another.
+          Unlike the two panels above (every individual ticker, whether or not it was ever held), this one is ONE
+          point per year — the top-quartile-by-signal group the strategy actually holds that year (just "the
+          winner" for a 2-ticker universe) — with the S&amp;P 500's own return for that same window subtracted out
+          of both axes. Removes "the whole market moved together that year" (beta) so what's left is whether the
+          strength of the SIGNAL'S ACTUAL PICK predicts whether that same pick beats or lags the market afterward —
+          the number that actually matters for the strategy this page backtests.
         </p>
       </div>
 
