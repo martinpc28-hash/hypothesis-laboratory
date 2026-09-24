@@ -1340,10 +1340,17 @@ function MacroFilteredStrategySection({ macroFilteredStrategy, strategy, tickers
   const signalOnlyTotalReturn = strategy.cumulative.length
     ? strategy.cumulative[strategy.cumulative.length - 1].cumulativeStrategy
     : null;
+  const sp500TotalReturn =
+    strategy.sp500Available && strategy.cumulative.length
+      ? strategy.cumulative[strategy.cumulative.length - 1].cumulativeSp500
+      : null;
   const total = macroFilteredStrategy.agreementCount + macroFilteredStrategy.disagreementCount;
 
   const rows = [
     { key: "signal", label: "Top quartile (signal only)", stats: strategy.stats.strategy, totalReturn: signalOnlyTotalReturn },
+    ...(strategy.sp500Available
+      ? [{ key: "sp500", label: "S&P 500", stats: strategy.stats.sp500, totalReturn: sp500TotalReturn }]
+      : []),
     { key: "macro", label: "Macro-filtered strategy", stats: macroFilteredStrategy.stats, totalReturn: macroFilteredStrategy.stats.totalReturn },
   ];
 
