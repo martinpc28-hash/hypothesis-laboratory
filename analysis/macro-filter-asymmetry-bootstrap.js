@@ -127,12 +127,19 @@ function runBootstrap(pairs, bootSeed) {
   let alphaPositiveCount = 0;
   let ratioAbove1Count = 0;
   let ratioUsableCount = 0;
+  // Standalone totals (not just the macro-vs-SPY diff) — lets us check whether a wide CI is
+  // something SPECIAL about the strategy, or just what n=13/14 resampled years does to ANY
+  // buy-and-hold return, including the benchmark itself.
+  const macroTotals = [];
+  const spyTotals = [];
 
   for (let b = 0; b < N_BOOT; b++) {
     const sample = [];
     for (let i = 0; i < n; i++) sample.push(pairs[Math.floor(rng() * n)]);
-    const { alphaTotal } = compounded(sample);
+    const { alphaTotal, macroTotal, spyTotal } = compounded(sample);
     totalAlphas.push(alphaTotal);
+    macroTotals.push(macroTotal);
+    spyTotals.push(spyTotal);
     if (alphaTotal > 0) alphaPositiveCount++;
 
     const { winYears, avgWin, avgLoss, ratio } = winLossStats(sample);
@@ -147,6 +154,8 @@ function runBootstrap(pairs, bootSeed) {
   ratios.sort((a, b) => a - b);
   totalAlphas.sort((a, b) => a - b);
   winRates.sort((a, b) => a - b);
+  macroTotals.sort((a, b) => a - b);
+  spyTotals.sort((a, b) => a - b);
 
   return {
     nBoot: N_BOOT,
@@ -161,6 +170,10 @@ function runBootstrap(pairs, bootSeed) {
     alphaPositivePct: alphaPositiveCount / N_BOOT,
     winRateMean: mean(winRates),
     winRateCi95: [percentile(winRates, 0.025), percentile(winRates, 0.975)],
+    macroTotalMedian: percentile(macroTotals, 0.5),
+    macroTotalCi95: [percentile(macroTotals, 0.025), percentile(macroTotals, 0.975)],
+    spyTotalMedian: percentile(spyTotals, 0.5),
+    spyTotalCi95: [percentile(spyTotals, 0.025), percentile(spyTotals, 0.975)],
   };
 }
 
@@ -190,7 +203,9 @@ async function main() {
   console.log(`% of resamples with ratio > 1x (wins bigger than losses): ${pct(boot.ratioAbove1Pct, 1)}`);
   console.log(`Total alpha: 95% CI: [${pp(boot.alphaCi95[0], 0)}, ${pp(boot.alphaCi95[1], 0)}]`);
   console.log(`% of resamples with total alpha > 0 (still beats S&P 500): ${pct(boot.alphaPositivePct, 1)}`);
-  console.log(`Win rate: mean=${pct(boot.winRateMean)}  95% CI: [${pct(boot.winRateCi95[0])}, ${pct(boot.winRateCi95[1])}]\n`);
+  console.log(`Win rate: mean=${pct(boot.winRateMean)}  95% CI: [${pct(boot.winRateCi95[0])}, ${pct(boot.winRateCi95[1])}]`);
+  console.log(`S&P 500 alone: median total return=${pct(boot.spyTotalMedian)}  95% CI: [${pct(boot.spyTotalCi95[0])}, ${pct(boot.spyTotalCi95[1])}]`);
+  console.log(`Macro filter alone: median total return=${pct(boot.macroTotalMedian)}  95% CI: [${pct(boot.macroTotalCi95[0])}, ${pct(boot.macroTotalCi95[1])}]\n`);
 
   console.log(`=== SUBPERIOD SPLIT (unmixed, real chronological halves) ===`);
   const half1 = pairs.filter((r) => r.year < SUBPERIOD_SPLIT_YEAR);
@@ -223,6 +238,8 @@ async function main() {
     console.log(`  % of resamples with ratio > 1x: ${pct(hb.ratioAbove1Pct, 1)}`);
     console.log(`  Total alpha: 95% CI: [${pp(hb.alphaCi95[0], 0)}, ${pp(hb.alphaCi95[1], 0)}]  % positive: ${pct(hb.alphaPositivePct, 1)}`);
     console.log(`  Win rate: mean=${pct(hb.winRateMean)}  95% CI: [${pct(hb.winRateCi95[0])}, ${pct(hb.winRateCi95[1])}]`);
+    console.log(`  S&P 500 alone: median=${pct(hb.spyTotalMedian)}  95% CI: [${pct(hb.spyTotalCi95[0])}, ${pct(hb.spyTotalCi95[1])}]`);
+    console.log(`  Macro filter alone: median=${pct(hb.macroTotalMedian)}  95% CI: [${pct(hb.macroTotalCi95[0])}, ${pct(hb.macroTotalCi95[1])}]`);
   }
 
   console.log();
