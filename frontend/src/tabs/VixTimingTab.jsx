@@ -31,6 +31,24 @@ function pct(v, digits = 1) {
   return v === null || v === undefined || Number.isNaN(v) ? "—" : `${(v * 100).toFixed(digits)}%`;
 }
 
+// The backend only gives cumulative wealth per year (cumulativeStrategy/cumulativeSp500), not each
+// year's own return — derived here the same way compounding works: this year's return is this
+// year's cumulative wealth divided by last year's, so "did this beat the market THIS year" can be
+// asked year by year instead of only as one end-to-end total.
+function yearlyReturnsFromCumulative(cumulative) {
+  let prevStrategy = 0;
+  let prevSp500 = 0;
+  const rows = [];
+  for (const c of cumulative) {
+    const strategyReturn = (1 + c.cumulativeStrategy) / (1 + prevStrategy) - 1;
+    const sp500Return = (1 + c.cumulativeSp500) / (1 + prevSp500) - 1;
+    rows.push({ year: c.year, strategyReturn, sp500Return, diff: strategyReturn - sp500Return });
+    prevStrategy = c.cumulativeStrategy;
+    prevSp500 = c.cumulativeSp500;
+  }
+  return rows;
+}
+
 export default function VixTimingTab({ setStatus }) {
   const [yearFrom, setYearFrom] = useState(DEFAULT_YEAR_FROM);
   const [yearTo, setYearTo] = useState(DEFAULT_YEAR_TO);
@@ -136,6 +154,17 @@ function VixTimingResult({ result }) {
     ...(msciWorldAvailable ? [{ key: "cumulativeMsciWorld", label: "MSCI World buy & hold", color: colors.warning }] : []),
   ];
 
+  const yearlyRows = yearlyReturnsFromCumulative(cumulative);
+  const winYears = yearlyRows.filter((r) => r.diff > 0);
+  const lossYears = yearlyRows.filter((r) => r.diff <= 0);
+  const avgWin = winYears.length ? winYears.reduce((a, r) => a + r.diff, 0) / winYears.length : null;
+  const avgLoss = lossYears.length ? lossYears.reduce((a, r) => a + r.diff, 0) / lossYears.length : null;
+  const strategyTotalMultiple = 1 + stats.strategy.totalReturn;
+  const sp500TotalMultiple = 1 + stats.sp500.totalReturn;
+  const totalAlpha = stats.strategy.totalReturn - stats.sp500.totalReturn;
+  const firstYear = yearlyRows.length ? yearlyRows[0].year : meta.yearFrom;
+  const lastYear = yearlyRows.length ? yearlyRows[yearlyRows.length - 1].year : meta.yearTo;
+
   return (
     <>
       <div style={ui.card}>
@@ -215,6 +244,107 @@ function VixTimingResult({ result }) {
       <div style={ui.card}>
         <h3 style={ui.cardTitle}>Rentabilidad acumulada</h3>
         <LineChart points={cumulative} series={series} xKey="year" />
+      </div>
+
+      <div style={ui.card}>
+        <h3 style={ui.cardTitle}>Rendimiento por año vs. {sp500Label}</h3>
+        <p style={ui.cardSubtitle}>
+          El mismo año calendario, comparado retorno contra retorno — no la curva acumulada de arriba, sino año por
+          año, para ver en qué años concretos esta regla de VIX realmente pone o quita dinero frente a simplemente
+          comprar y mantener.
+        </p>
+
+        <div
+          style={{
+            background: totalAlpha >= 0 ? colors.successSoft : colors.warningSoft,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 10,
+            padding: 16,
+            marginBottom: 16,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: 0.4,
+              color: totalAlpha >= 0 ? colors.success : colors.warning,
+            }}
+          >
+            En dinero ({firstYear}–{lastYear})
+          </div>
+          <p style={{ margin: "6px 0 8px 0", fontSize: 14 }}>
+            $1 invertido en {firstYear} termina en <strong>${strategyTotalMultiple.toFixed(2)}</strong> con esta
+            regla de VIX timing, frente a <strong>${sp500TotalMultiple.toFixed(2)}</strong> comprando y manteniendo{" "}
+            {sp500Label}
+            {" "}(
+            <strong style={{ color: totalAlpha >= 0 ? colors.success : colors.danger }}>
+              {totalAlpha >= 0 ? "+" : ""}
+              {pct(totalAlpha)}
+            </strong>{" "}
+            de diferencia acumulada).
+          </p>
+          <p style={{ margin: 0, fontSize: 14 }}>
+            Le ganó al benchmark en <strong>{winYears.length}</strong> de <strong>{yearlyRows.length}</strong> años (
+            <strong>{pct(yearlyRows.length ? winYears.length / yearlyRows.length : null, 0)}</strong>). En los años
+            que ganó, lo hizo por{" "}
+            <strong style={{ color: colors.success }}>{avgWin !== null ? `+${pct(avgWin)}` : "—"}</strong> en
+            promedio; en los que perdió, por{" "}
+            <strong style={{ color: colors.danger }}>{avgLoss !== null ? pct(avgLoss) : "—"}</strong>. Perder menos
+            años de los que gana no garantiza terminar arriba en dinero si esos años perdidos pesan más — esto es lo
+            que realmente decide el resultado.
+          </p>
+        </div>
+
+        <div style={ui.tableScroll}>
+          <table style={ui.table}>
+            <thead>
+              <tr>
+                <th style={ui.th}>Año</th>
+                <th style={ui.th}>VIX timing</th>
+                <th style={ui.th}>{sp500Label}</th>
+                <th style={ui.th}>Diferencial</th>
+              </tr>
+            </thead>
+            <tbody>
+              {yearlyRows.map((r) => (
+                <tr key={r.year}>
+                  <td style={ui.td}>{r.year}</td>
+                  <td style={ui.td}>{pct(r.strategyReturn)}</td>
+                  <td style={ui.td}>{pct(r.sp500Return)}</td>
+                  <td style={{ ...ui.td, color: r.diff >= 0 ? colors.success : colors.danger, fontWeight: 700 }}>
+                    {r.diff >= 0 ? "+" : ""}
+                    {pct(r.diff)}
+                  </td>
+                </tr>
+              ))}
+              <tr>
+                <td
+                  colSpan={4}
+                  style={{
+                    ...ui.td,
+                    borderTop: `2px solid ${colors.border}`,
+                    borderBottom: "none",
+                    whiteSpace: "normal",
+                  }}
+                >
+                  <div style={{ fontWeight: 700, color: colors.text }}>
+                    {winYears.length}/{yearlyRows.length} years con diferencial positivo (
+                    {yearlyRows.length ? Math.round((winYears.length / yearlyRows.length) * 100) : 0}%)
+                  </div>
+                  <div style={{ marginTop: 4, fontWeight: 700, color: totalAlpha >= 0 ? colors.success : colors.danger }}>
+                    Alfa total generado: {totalAlpha >= 0 ? "+" : ""}
+                    {pct(totalAlpha)}{" "}
+                    <span style={{ fontWeight: 400, color: colors.textMuted }}>
+                      (retorno acumulado en todo el período: VIX timing menos {sp500Label})
+                    </span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div style={ui.card}>
