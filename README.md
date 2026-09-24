@@ -75,6 +75,9 @@ full-revaluation/
 ├── src/main/resources/application.yml   # local / demo (H2) / rds (Postgres) profiles
 ├── sql/schema.sql        # Oracle DDL, kept for the CloudFormation option below — not used by the live deployment (which runs on Postgres via Hibernate auto-DDL)
 ├── infra/                # CloudFormation templates for an Oracle-based deployment (see caveat below)
+├── analysis/             # Standalone Node scripts for offline robustness checks (e.g. bootstrap/
+│                         # subperiod tests) whose RESULTS get quoted as static text in the UI —
+│                         # kept here so those numbers are re-derivable, not just asserted
 └── frontend/
     ├── src/App.jsx           # shell: header, portfolio switcher, tab nav
     ├── src/tabs/             # Dashboard, Portfolios, Scenarios tabs
