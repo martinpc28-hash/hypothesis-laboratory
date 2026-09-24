@@ -1364,6 +1364,7 @@ function MacroFilteredStrategySection({ macroFilteredStrategy, strategy, tickers
   const lossYears = macroPerYearVsSp500.filter((r) => r.diffVsSp500 <= 0);
   const avgWin = winYears.length ? winYears.reduce((a, r) => a + r.diffVsSp500, 0) / winYears.length : null;
   const avgLoss = lossYears.length ? lossYears.reduce((a, r) => a + r.diffVsSp500, 0) / lossYears.length : null;
+  const winLossRatio = avgWin !== null && avgLoss ? Math.abs(avgWin / avgLoss) : null;
 
   // The years the macro filter actually changes anything are the disagreement years (on
   // agreement years it's identical to the raw signal pick, a no-op) — so that's where its real
@@ -1455,6 +1456,15 @@ function MacroFilteredStrategySection({ macroFilteredStrategy, strategy, tickers
             por <strong style={{ color: colors.success }}>{avgWin !== null ? `+${pct(avgWin)}` : "—"}</strong> en promedio;
             en los que perdió, por <strong style={{ color: colors.danger }}>{avgLoss !== null ? pct(avgLoss) : "—"}</strong>.
           </p>
+          {winLossRatio !== null && (
+            <p style={{ margin: "0 0 8px 0", fontSize: 14 }}>
+              Esa asimetría —ganar{" "}
+              <strong>{winLossRatio.toFixed(1)}x</strong> más grande de lo que se pierde— es la razón de fondo por la
+              que el total compuesto es tan alto pese a ganar "solo" el {pct(winYears.length / macroPerYearVsSp500.length, 0)} de
+              los años. Es un patrón fuerte y vale la pena someterlo a más pruebas (submuestras, bootstrap) antes de
+              confiar en él a futuro.
+            </p>
+          )}
           {overrideYears.length > 0 && (
             <p style={{ margin: 0, fontSize: 14 }}>
               El filtro macro solo cambia algo en los <strong>{overrideYears.length}</strong> años en que contradice a
