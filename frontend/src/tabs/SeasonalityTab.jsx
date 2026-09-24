@@ -671,7 +671,7 @@ function RankingHeatmaps({ panel, sp500Panel, tickers, yearFrom, yearTo, onAudit
 // whole period — the spread between the strategy's and the benchmark's TOTAL compounded
 // return (last point of the cumulative curve), not a sum or average of the yearly diffs.
 // That distinction matters: compounding means the two aren't the same number.
-function DiffScoreRow({ perYear, diffKey, cumulative, strategyCumKey, benchmarkCumKey, colSpan }) {
+function DiffScoreRow({ perYear, diffKey, cumulative, strategyCumKey, benchmarkCumKey, colSpan, alphaLabel = "top quartile minus benchmark" }) {
   const rows = perYear.filter((r) => r[diffKey] !== null && r[diffKey] !== undefined);
   const positive = rows.filter((r) => r[diffKey] >= 0).length;
   const pctPositive = rows.length ? Math.round((positive / rows.length) * 100) : 0;
@@ -699,7 +699,7 @@ function DiffScoreRow({ perYear, diffKey, cumulative, strategyCumKey, benchmarkC
             Total alpha generated: {totalAlpha >= 0 ? "+" : ""}
             {pct(totalAlpha)}{" "}
             <span style={{ fontWeight: 400, color: colors.textMuted }}>
-              (cumulative return over the whole period: top quartile minus benchmark)
+              (cumulative return over the whole period: {alphaLabel})
             </span>
           </div>
         )}
@@ -1347,6 +1347,47 @@ function MacroFilteredStrategySection({ macroFilteredStrategy, strategy, tickers
     { key: "macro", label: "Macro-filtered strategy", stats: macroFilteredStrategy.stats, totalReturn: macroFilteredStrategy.stats.totalReturn },
   ];
 
+  // Money-focused view: join the macro-filtered pick's per-year return with the same S&P 500
+  // full-year return already computed for the "Top quartile" table above (strategy.perYear),
+  // so "does this beat the market" is answered year by year, not just as one cumulative number.
+  const sp500ByYear = new Map(strategy.perYear.map((p) => [p.year, p.sp500Return]));
+  const strategyReturnByYear = new Map(strategy.perYear.map((p) => [p.year, p.strategyReturn]));
+  const macroPerYearVsSp500 = macroFilteredStrategy.perYear
+    .map((m) => {
+      const sp500Return = sp500ByYear.get(m.year);
+      if (sp500Return === undefined || sp500Return === null) return null;
+      return { ...m, sp500Return, diffVsSp500: m.chosenReturn - sp500Return };
+    })
+    .filter(Boolean);
+
+  const winYears = macroPerYearVsSp500.filter((r) => r.diffVsSp500 > 0);
+  const lossYears = macroPerYearVsSp500.filter((r) => r.diffVsSp500 <= 0);
+  const avgWin = winYears.length ? winYears.reduce((a, r) => a + r.diffVsSp500, 0) / winYears.length : null;
+  const avgLoss = lossYears.length ? lossYears.reduce((a, r) => a + r.diffVsSp500, 0) / lossYears.length : null;
+
+  // The years the macro filter actually changes anything are the disagreement years (on
+  // agreement years it's identical to the raw signal pick, a no-op) — so that's where its real
+  // money value shows up: what did overriding the signal's own pick actually buy, on average?
+  const overrideYears = macroPerYearVsSp500.filter((r) => !r.agree);
+  const overrideAvgMacroReturn = overrideYears.length
+    ? overrideYears.reduce((a, r) => a + r.chosenReturn, 0) / overrideYears.length
+    : null;
+  const overrideAvgSignalOnlyReturn = overrideYears.length
+    ? overrideYears.reduce((a, r) => a + (strategyReturnByYear.get(r.year) ?? 0), 0) / overrideYears.length
+    : null;
+
+  const sp500TotalMultiple =
+    strategy.sp500Available && strategy.cumulative.length
+      ? 1 + strategy.cumulative[strategy.cumulative.length - 1].cumulativeSp500
+      : null;
+  const macroTotalMultiple =
+    macroFilteredStrategy.stats.totalReturn !== undefined && macroFilteredStrategy.stats.totalReturn !== null
+      ? 1 + macroFilteredStrategy.stats.totalReturn
+      : null;
+  const signalTotalMultiple = signalOnlyTotalReturn !== null ? 1 + signalOnlyTotalReturn : null;
+  const firstYear = macroPerYearVsSp500.length ? macroPerYearVsSp500[0].year : null;
+  const lastYear = macroPerYearVsSp500.length ? macroPerYearVsSp500[macroPerYearVsSp500.length - 1].year : null;
+
   return (
     <div style={{ marginTop: 24, paddingTop: 20, borderTop: `1px solid ${colors.border}` }}>
       <h4 style={{ margin: "0 0 8px 0", fontSize: 15 }}>Strategy performance — with macro filter</h4>
@@ -1389,6 +1430,88 @@ function MacroFilteredStrategySection({ macroFilteredStrategy, strategy, tickers
           </tbody>
         </table>
       </div>
+
+      {sp500TotalMultiple !== null && macroTotalMultiple !== null && (
+        <div
+          style={{
+            background: colors.successSoft,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 10,
+            padding: 16,
+            marginTop: 16,
+          }}
+        >
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, color: colors.success }}>
+            En dinero ({firstYear}–{lastYear})
+          </div>
+          <p style={{ margin: "6px 0 8px 0", fontSize: 14 }}>
+            $1 invertido en {firstYear} termina en <strong>${macroTotalMultiple.toFixed(2)}</strong> con el filtro
+            macro, frente a <strong>${signalTotalMultiple !== null ? signalTotalMultiple.toFixed(2) : "—"}</strong>{" "}
+            siguiendo solo la señal y <strong>${sp500TotalMultiple.toFixed(2)}</strong> en el S&amp;P 500.
+          </p>
+          <p style={{ margin: "0 0 8px 0", fontSize: 14 }}>
+            Le ganó al S&amp;P 500 en <strong>{winYears.length}</strong> de <strong>{macroPerYearVsSp500.length}</strong> años
+            (<strong>{pct(winYears.length / macroPerYearVsSp500.length, 0)}</strong>). En los años que le ganó, lo hizo
+            por <strong style={{ color: colors.success }}>{avgWin !== null ? `+${pct(avgWin)}` : "—"}</strong> en promedio;
+            en los que perdió, por <strong style={{ color: colors.danger }}>{avgLoss !== null ? pct(avgLoss) : "—"}</strong>.
+          </p>
+          {overrideYears.length > 0 && (
+            <p style={{ margin: 0, fontSize: 14 }}>
+              El filtro macro solo cambia algo en los <strong>{overrideYears.length}</strong> años en que contradice a
+              la señal (cuando coinciden, da igual). Esos años, seguir al filtro macro dio en promedio{" "}
+              <strong style={{ color: overrideAvgMacroReturn >= overrideAvgSignalOnlyReturn ? colors.success : colors.danger }}>
+                {pct(overrideAvgMacroReturn)}
+              </strong>
+              , frente a <strong>{pct(overrideAvgSignalOnlyReturn)}</strong> si se hubiera seguido la señal sola — la
+              diferencia real que pone sobre la mesa anular la señal.
+            </p>
+          )}
+        </div>
+      )}
+
+      {macroPerYearVsSp500.length > 0 && (
+        <div style={{ ...ui.tableScroll, marginTop: 16 }}>
+          <table style={ui.table}>
+            <thead>
+              <tr>
+                <th style={ui.th}>Year</th>
+                <th style={ui.th}>Macro pick</th>
+                <th style={ui.th}>vs. signal</th>
+                <th style={ui.th}>Macro-filtered return</th>
+                <th style={ui.th}>S&amp;P 500</th>
+                <th style={ui.th}>Differential</th>
+              </tr>
+            </thead>
+            <tbody>
+              {macroPerYearVsSp500.map((r) => (
+                <tr key={r.year}>
+                  <td style={ui.td}>{r.year}</td>
+                  <td style={ui.td}>{r.macroPick}</td>
+                  <td style={{ ...ui.td, color: r.agree ? colors.textMuted : colors.warning }}>
+                    {r.agree ? "Agrees" : "Overrides"}
+                  </td>
+                  <td style={ui.td}>{pct(r.chosenReturn)}</td>
+                  <td style={ui.td}>{pct(r.sp500Return)}</td>
+                  <td style={{ ...ui.td, color: r.diffVsSp500 >= 0 ? colors.success : colors.danger, fontWeight: 700 }}>
+                    {r.diffVsSp500 >= 0 ? "+" : ""}
+                    {pct(r.diffVsSp500)}
+                  </td>
+                </tr>
+              ))}
+              <DiffScoreRow
+                perYear={macroPerYearVsSp500}
+                diffKey="diffVsSp500"
+                cumulative={mergedCumulative}
+                strategyCumKey="cumulativeMacroFiltered"
+                benchmarkCumKey="cumulativeSp500"
+                colSpan={6}
+                alphaLabel="macro-filtered strategy minus S&P 500"
+              />
+            </tbody>
+          </table>
+        </div>
+      )}
+
       <p style={{ ...ui.muted, marginTop: 8 }}>
         Same historical-backtest caveat as everywhere else here: this compares two rules over the same {total} years
         the macro split itself was found on — encouraging, not proof it will keep working.
