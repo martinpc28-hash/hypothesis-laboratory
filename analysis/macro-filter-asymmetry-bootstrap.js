@@ -195,10 +195,11 @@ async function main() {
   console.log(`=== SUBPERIOD SPLIT (unmixed, real chronological halves) ===`);
   const half1 = pairs.filter((r) => r.year < SUBPERIOD_SPLIT_YEAR);
   const half2 = pairs.filter((r) => r.year >= SUBPERIOD_SPLIT_YEAR);
-  for (const [label, half] of [
+  const halves = [
     [`${half1[0].year}-${half1[half1.length - 1].year}`, half1],
     [`${half2[0].year}-${half2[half2.length - 1].year}`, half2],
-  ]) {
+  ];
+  for (const [label, half] of halves) {
     const s = winLossStats(half);
     const t = compounded(half);
     console.log(
@@ -206,11 +207,31 @@ async function main() {
         `macro filter ${pct(t.macroTotal)} vs S&P 500 ${pct(t.spyTotal)}, alpha ${pp(t.alphaTotal, 0)}`
     );
   }
+
+  // Bootstrap EACH half on its own (resampling only within that half's n=13/14 years) — the
+  // point estimates above (3.64x, 2.47x) carry a lot of uncertainty on their own with a sample
+  // this small; this quantifies exactly how much, the same way the full-sample bootstrap does.
+  console.log(`\n=== BOOTSTRAP WITHIN EACH SUBPERIOD (${N_BOOT} resamples each, seed=${seed}) ===`);
+  let halfIdx = 0;
+  for (const [label, half] of halves) {
+    halfIdx++;
+    const hb = runBootstrap(half, seed + halfIdx);
+    console.log(`${label} (n=${half.length}):`);
+    console.log(
+      `  Ratio: mean=${hb.ratioMean.toFixed(2)}x median=${hb.ratioMedian.toFixed(2)}x  95% CI: [${hb.ratioCi95[0].toFixed(2)}x, ${hb.ratioCi95[1].toFixed(2)}x]  (usable in ${hb.ratioUsableCount}/${N_BOOT} resamples)`
+    );
+    console.log(`  % of resamples with ratio > 1x: ${pct(hb.ratioAbove1Pct, 1)}`);
+    console.log(`  Total alpha: 95% CI: [${pp(hb.alphaCi95[0], 0)}, ${pp(hb.alphaCi95[1], 0)}]  % positive: ${pct(hb.alphaPositivePct, 1)}`);
+    console.log(`  Win rate: mean=${pct(hb.winRateMean)}  95% CI: [${pct(hb.winRateCi95[0])}, ${pct(hb.winRateCi95[1])}]`);
+  }
+
   console.log();
   console.log(
-    "Caveat: both checks are bounded by the SAME 27 real years — the bootstrap tests sampling\n" +
-      "uncertainty within them, the split tests regime-dependence within them. Neither can test\n" +
-      "genuine out-of-sample risk, since 2000-2026 is the full trading history for these ETFs."
+    "Caveat: all of these checks are bounded by the SAME 27 real years — the full-sample bootstrap\n" +
+      "tests sampling uncertainty within them, the split tests regime-dependence within them, and the\n" +
+      "per-half bootstrap tests sampling uncertainty within each half on its own (n=13/14, so its CIs\n" +
+      "are necessarily much wider than the full-sample one). None of them can test genuine out-of-sample\n" +
+      "risk, since 2000-2026 is the full trading history for these ETFs."
   );
 }
 
