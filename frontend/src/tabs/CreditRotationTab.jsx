@@ -12,9 +12,8 @@ const auditableCell = {
 };
 
 const CURRENT_YEAR = new Date().getFullYear();
-// Real ETF data (HYG/LQD) only starts 2007/2002 — years before that are covered by splicing onto
-// VWEHX/VWESX (real Vanguard mutual funds in the same asset class, data since 2000-01), so 2000
-// is the true start of what this strategy can be tested on, matching the rest of this project.
+// VWEHX/VWESX (the USD instruments — real Vanguard mutual funds) cover the full 2000-2026 range
+// directly, matching the rest of this project's range.
 const DEFAULT_YEAR_FROM = 2000;
 const DEFAULT_YEAR_TO = CURRENT_YEAR;
 
@@ -100,19 +99,22 @@ export default function CreditRotationTab({ setStatus }) {
       <div style={ui.card}>
         <h2 style={ui.cardTitle}>Rotación de crédito: High Yield vs. Investment Grade</h2>
         <p style={ui.cardSubtitle}>
-          Se mantiene el dinero en bonos investment grade (LQD) hasta que la variable macro elegida cierra en{" "}
-          {enterThreshold} o más — ahí se pasa 100% a high yield (HYG) — y se vuelve a investment grade cuando cierra
-          en {exitThreshold} o menos. Misma convención en las 7 variables: "entra en HY con una lectura ALTA, sale a
-          IG con una lectura BAJA" — igual que ya se validó para el VIX en la pestaña VIX Timing — para no imponer a
-          mano qué dirección "debería" funcionar en cada variable y dejar que la búsqueda de abajo lo decida con
-          datos. La decisión de cada día usa el cierre del día anterior, nunca el del mismo día. Todos los resultados
-          se dan siempre en USD y en EUR por separado, nunca uno solo.
+          Se mantiene el dinero en bonos investment grade (fondo VWESX) hasta que la variable macro elegida cierra en{" "}
+          {enterThreshold} o más — ahí se pasa 100% a high yield (fondo VWEHX) — y se vuelve a investment grade cuando
+          cierra en {exitThreshold} o menos. Misma convención en las 7 variables: "entra en HY con una lectura ALTA,
+          sale a IG con una lectura BAJA" — igual que ya se validó para el VIX en la pestaña VIX Timing — para no
+          imponer a mano qué dirección "debería" funcionar en cada variable y dejar que la búsqueda de abajo lo
+          decida con datos. La decisión de cada día usa el cierre del día anterior, nunca el del mismo día. Todos los
+          resultados se dan siempre en USD y en EUR por separado, nunca uno solo.
         </p>
         <p style={ui.cardSubtitle}>
-          HYG/LQD solo tienen datos reales desde 2007/2002 — para llegar a 2000 se empalman con fondos Vanguard
-          reales del mismo tipo de activo (VWEHX para high yield, VWESX para investment grade, ambos con historia
-          real desde 2000), no una fórmula sintética. Usan precio ajustado por dividendos/cupones — en bonos, la
-          mayor parte del retorno es la distribución, no la apreciación del precio.
+          100% fondos reales, sin ETFs empalmados: VWEHX (Vanguard High-Yield Corporate) y VWESX (Vanguard Long-Term
+          Investment-Grade) cubren toda la serie 2000-2026 en USD. En EUR se usa un fondo EUR real donde existe —
+          IHYG.L (iShares € High Yield, real desde 2010-09) e IEAC.L (iShares Core € Corp Bond, real desde
+          2009-03) — y antes de esas fechas, conversión cambiaria real del fondo USD (no una fórmula sintética de
+          yield). Cada operación indica cuál de las dos fuentes usó su retorno en EUR. Todos los precios están
+          ajustados por dividendos/cupones — en bonos, la mayor parte del retorno es la distribución, no la
+          apreciación del precio.
         </p>
 
         <div style={ui.form}>
@@ -295,9 +297,10 @@ function CreditRotationResult({ result }) {
           Resultados {meta.yearFrom}–{meta.yearTo}
         </h3>
         <p style={ui.cardSubtitle}>
-          {meta.featureLabel} · entra en HYG con lectura ≥ {meta.enterThreshold} · sale a LQD con lectura ≤{" "}
-          {meta.exitThreshold} · datos desde {meta.dataStart} ({meta.hyProxyTicker}/{meta.igProxyTicker} hasta el
-          inicio real de {meta.hyTicker}/{meta.igTicker}, luego los ETFs directamente)
+          {meta.featureLabel} · entra en {meta.hyTicker} con lectura ≥ {meta.enterThreshold} · sale a {meta.igTicker} con
+          lectura ≤ {meta.exitThreshold} · USD: {meta.hyTicker}/{meta.igTicker} desde {meta.dataStart} · EUR:{" "}
+          {meta.hyEurTicker} real desde {meta.hyEurRealStart} (antes, conversión cambiaria de {meta.hyTicker}) y{" "}
+          {meta.igEurTicker} real desde {meta.igEurRealStart} (antes, conversión cambiaria de {meta.igTicker})
         </p>
         <div style={ui.tableScroll}>
           <table style={ui.table}>
@@ -325,8 +328,8 @@ function CreditRotationResult({ result }) {
             </thead>
             <tbody>
               <StatsRow label="Rotación (estrategia)" usd={stats.usd.strategy} eur={stats.eur.strategy} />
-              <StatsRow label="HYG (buy & hold)" usd={stats.usd.hy} eur={stats.eur.hy} />
-              <StatsRow label="LQD (buy & hold)" usd={stats.usd.ig} eur={stats.eur.ig} />
+              <StatsRow label={`${meta.hyTicker} (buy & hold)`} usd={stats.usd.hy} eur={stats.eur.hy} />
+              <StatsRow label={`${meta.igTicker} (buy & hold)`} usd={stats.usd.ig} eur={stats.eur.ig} />
               {spyAvailable && (
                 <StatsRow label="S&P 500 (referencia, no es la alternativa real)" usd={stats.usd.spy} eur={stats.eur.spy} />
               )}
@@ -335,9 +338,10 @@ function CreditRotationResult({ result }) {
         </div>
         <p style={{ ...ui.muted, marginTop: 8 }}>
           El S&amp;P 500 se muestra solo como referencia de contexto (renta variable vs. renta fija) — la decisión
-          real que esta estrategia toma es entre HYG y LQD, no contra acciones. La columna EUR es el retorno real de
-          un inversor en euros comprando estos instrumentos en USD, con exposición cambiaria real (sin cobertura) —
-          se le suma el movimiento EUR/USD del período, no es una versión sintética.
+          real que esta estrategia toma es entre {meta.hyTicker} y {meta.igTicker}, no contra acciones. La columna
+          EUR combina un fondo EUR real ({meta.hyEurTicker}/{meta.igEurTicker}) desde su inicio real con conversión
+          cambiaria real antes de eso — el S&amp;P 500 en EUR sigue siendo 100% conversión cambiaria, al ser solo una
+          referencia de contexto.
         </p>
         <div style={{ ...ui.statGrid, marginTop: 16 }}>
           <div style={ui.statCard}>
@@ -364,7 +368,10 @@ function CreditRotationResult({ result }) {
 
       <div style={ui.card}>
         <h3 style={ui.cardTitle}>Operaciones</h3>
-        <p style={ui.cardSubtitle}>Incluye los tramos en HYG y en LQD — juntos cubren todo el rango elegido.</p>
+        <p style={ui.cardSubtitle}>
+          Incluye los tramos en {meta.hyTicker} y en {meta.igTicker} — juntos cubren todo el rango elegido. La columna
+          "Fuente EUR" indica si ese tramo usó el fondo EUR real o la conversión cambiaria del fondo USD.
+        </p>
         <div style={ui.tableScroll}>
           <table style={ui.table}>
             <thead>
@@ -376,6 +383,7 @@ function CreditRotationResult({ result }) {
                 <th style={ui.th}>{meta.featureLabel} salida</th>
                 <th style={ui.th}>Retorno (USD)</th>
                 <th style={ui.th}>Retorno (EUR)</th>
+                <th style={ui.th}>Fuente EUR</th>
               </tr>
             </thead>
             <tbody>
@@ -383,7 +391,7 @@ function CreditRotationResult({ result }) {
                 <tr key={i}>
                   <td style={ui.td}>
                     <span style={ui.badge(t.type === "HY" ? "primary" : "neutral")}>
-                      {t.type === "HY" ? "HYG (high yield)" : "LQD (investment grade)"}
+                      {t.type === "HY" ? `${meta.hyTicker} (high yield)` : `${meta.igTicker} (investment grade)`}
                     </span>
                   </td>
                   <td style={ui.td}>{t.entryDate}</td>
@@ -395,6 +403,12 @@ function CreditRotationResult({ result }) {
                   </td>
                   <td style={{ ...ui.td, ...auditableCell }} onClick={() => setTradeAudit(t)}>
                     {pct(t.tradeReturnEur)}
+                  </td>
+                  <td style={ui.td}>
+                    <span style={ui.badge(t.eurSourceAtEntry === "REAL_FUND" ? "success" : "neutral")}>
+                      {t.eurSourceAtEntry === "REAL_FUND" ? "Fondo EUR" : "FX sintético"}
+                      {t.eurSourceAtEntry !== (t.open ? t.eurSourceAsOf : t.eurSourceAtExit) ? " → cambia" : ""}
+                    </span>
                   </td>
                 </tr>
               ))}
@@ -410,7 +424,7 @@ function CreditRotationResult({ result }) {
             <tbody>
               <tr>
                 <td style={{ padding: "3px 0", color: colors.textMuted, width: "45%" }}>
-                  Fecha / precio de compra ({tradeAudit.type === "HY" ? "HYG" : "LQD"}, ajustado, USD)
+                  Fecha / precio de compra (USD, ajustado)
                 </td>
                 <td style={{ padding: "3px 0", textAlign: "right" }}>
                   {tradeAudit.entryDate} · <strong>${Number(tradeAudit.entryPrice).toFixed(2)}</strong>
@@ -418,11 +432,33 @@ function CreditRotationResult({ result }) {
               </tr>
               <tr>
                 <td style={{ padding: "3px 0", color: colors.textMuted }}>
-                  {tradeAudit.open ? "Precio actual (tramo abierto)" : "Fecha / precio de venta"}
+                  {tradeAudit.open ? "Precio actual (tramo abierto), USD" : "Fecha / precio de venta, USD"}
                 </td>
                 <td style={{ padding: "3px 0", textAlign: "right" }}>
                   {tradeAudit.open ? tradeAudit.asOfDate : tradeAudit.exitDate} ·{" "}
                   <strong>${Number(tradeAudit.open ? tradeAudit.asOfPrice : tradeAudit.exitPrice).toFixed(2)}</strong>
+                </td>
+              </tr>
+              <tr>
+                <td style={{ padding: "3px 0", color: colors.textMuted, borderTop: `1px dashed ${colors.border}` }}>
+                  Precio de compra en EUR ({tradeAudit.eurSourceAtEntry === "REAL_FUND" ? "fondo EUR real" : "conversión cambiaria"})
+                </td>
+                <td style={{ padding: "3px 0", textAlign: "right", borderTop: `1px dashed ${colors.border}` }}>
+                  <strong>€{Number(tradeAudit.entryPriceEur).toFixed(2)}</strong>
+                </td>
+              </tr>
+              <tr>
+                <td style={{ padding: "3px 0", color: colors.textMuted }}>
+                  Precio de {tradeAudit.open ? "hoy" : "venta"} en EUR (
+                  {(tradeAudit.open ? tradeAudit.eurSourceAsOf : tradeAudit.eurSourceAtExit) === "REAL_FUND"
+                    ? "fondo EUR real"
+                    : "conversión cambiaria"}
+                  )
+                </td>
+                <td style={{ padding: "3px 0", textAlign: "right" }}>
+                  <strong>
+                    €{Number(tradeAudit.open ? tradeAudit.asOfPriceEur : tradeAudit.exitPriceEur).toFixed(2)}
+                  </strong>
                 </td>
               </tr>
               <tr>
@@ -454,8 +490,11 @@ function CreditRotationResult({ result }) {
             </tbody>
           </table>
           <p style={{ ...ui.muted, marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${colors.border}` }}>
-            El retorno en EUR incluye el movimiento del precio en USD más el movimiento real de USD/EUR en el mismo
-            período — no hay cobertura cambiaria en esta versión.
+            {tradeAudit.eurSourceAtEntry === "REAL_FUND" && (tradeAudit.open ? tradeAudit.eurSourceAsOf : tradeAudit.eurSourceAtExit) === "REAL_FUND"
+              ? "Todo el tramo usó el fondo EUR real — no es una conversión, es la performance real del fondo cotizado en EUR."
+              : (tradeAudit.open ? tradeAudit.eurSourceAsOf : tradeAudit.eurSourceAtExit) === "REAL_FUND"
+              ? "Este tramo cruza la fecha de inicio del fondo EUR real: empezó con conversión cambiaria del fondo USD y terminó con el fondo EUR real."
+              : "Todo el tramo usó conversión cambiaria real del fondo USD (el fondo EUR real todavía no existía en este período) — no hay cobertura cambiaria en esta versión."}
           </p>
           <button style={{ ...ui.button("secondary"), marginTop: 10 }} onClick={() => setTradeAudit(null)}>
             Cerrar

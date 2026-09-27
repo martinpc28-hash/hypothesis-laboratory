@@ -16,23 +16,27 @@ import java.util.NavigableMap;
 import java.util.TreeMap;
 
 /**
- * "Credit rotation" tactical strategy: sit in investment-grade corporate bonds (LQD) until a
- * chosen macro reading signals elevated credit stress, then rotate 100% into high-yield
- * corporate bonds (HYG) until conditions calm back down — the same day-by-day state machine as
- * VixTimingService (cash/S&P 500), generalized to a different pair of holdings and a choice of
- * SEVEN candidate trigger series instead of one hardcoded VIX.
+ * "Credit rotation" tactical strategy: sit in investment-grade corporate bonds until a chosen
+ * macro reading signals elevated credit stress, then rotate 100% into high-yield corporate bonds
+ * until conditions calm back down — the same day-by-day state machine as VixTimingService
+ * (cash/S&P 500), generalized to a different pair of holdings and a choice of SEVEN candidate
+ * trigger series instead of one hardcoded VIX.
  *
- * Tickers: HYG (iShares iBoxx $ High Yield Corporate Bond ETF, real data since 2007-05) and LQD
- * (iShares iBoxx $ Investment Grade Corporate Bond ETF, real data since 2002-08) are the
- * longest-history LIQUID ETFs available — true short-duration HY funds (SJNK, SHYG) only start
- * in 2012-2013. To reach further back (matching the ~2000-start range the rest of this project
- * uses), each is SPLICED onto a real, much-older Vanguard mutual fund in the same asset class —
- * VWEHX (Vanguard High-Yield Corporate, real daily data since 2000-01) for HYG, and VWESX
- * (Vanguard Long-Term Investment-Grade, real daily data since 2000-01) for LQD — see
- * buildSplicedCloses. This is real fund performance, not a modeled/synthetic yield-curve proxy;
- * the tradeoff is that the mutual funds are actively managed and not perfectly identical
- * duration/composition to the ETFs they're spliced onto, so the pre-ETF-inception portion of any
- * result is a reasonable approximation of the asset class, not the exact HYG/LQD index.
+ * Instruments — real funds throughout, not ETFs spliced onto funds: liquid HY/IG ETFs (HYG, LQD)
+ * only start in 2007/2002, too short for a 2000+ backtest, and true short-duration HY ETFs
+ * (SJNK, SHYG) only start in 2012-2013. Real Vanguard mutual funds cover the whole 2000-2026
+ * range directly instead:
+ *   - USD: VWEHX (Vanguard High-Yield Corporate) and VWESX (Vanguard Long-Term Investment-Grade),
+ *     both with real daily data since 2000-01 — used for their FULL history, no splicing needed.
+ *   - EUR: a EUR-based investor's return is NOT just the USD funds' returns converted at the spot
+ *     rate for the whole period — real EUR-denominated funds in the same asset class exist and
+ *     are used wherever they cover the date: IHYG.L (iShares € High Yield Corp Bond UCITS ETF,
+ *     real EUR data since 2010-09) and IEAC.L (iShares Core € Corp Bond UCITS ETF, real EUR data
+ *     since 2009-03). Before each one's own real start date, its EUR series falls back to a
+ *     synthetic FX-converted version of the USD fund (see buildSyntheticEurSeries + spliceOnto) —
+ *     so the EUR column is real fund performance from ~2009-2010 onward, and only synthetic in
+ *     the 2000s where no real EUR-denominated alternative exists. Every trade segment records
+ *     which regime (REAL_FUND vs FX_SYNTHETIC) applied to its EUR return at entry and exit.
  *
  * Candidate features: the same 6 macro series SeasonalityService's asset-split search already
  * uses (inflation YoY, growth YoY, 10Y rate level, 10Y rate change YoY, yield curve slope, VIX),
@@ -55,21 +59,20 @@ import java.util.TreeMap;
  * Prices: unlike every other equity-momentum backtest in this project (which use raw close —
  * a fine approximation when dividends are a small share of total return), this service uses
  * YahooFinanceService.fetchAdjustedDailyCloses — Yahoo's dividend/coupon-ADJUSTED close — for
- * every ticker. Bond fund returns are dominated by their distributions, not price appreciation:
- * HYG's raw price alone actually trends DOWN over its history even though its real total return
- * is strongly positive, so raw close would have made this whole strategy meaningless.
+ * every ticker. Bond fund returns are dominated by their distributions, not price appreciation.
  *
- * Currency: every result always reports BOTH the native USD return and a real EUR-investor
- * return (FX-exposed, no hedging) side by side — never one or the other behind a toggle.
+ * Currency: every result always reports BOTH the native USD return and the EUR return (real fund
+ * where available, FX-synthetic before that) side by side — never one or the other behind a
+ * toggle.
  */
 @Service
 public class CreditRotationService {
 
     private static final int TRADING_DAYS_PER_YEAR = 252;
-    private static final String HY_TICKER = "HYG";
-    private static final String IG_TICKER = "LQD";
-    private static final String HY_PROXY_TICKER = "VWEHX"; // Vanguard High-Yield Corporate — real data since 2000-01
-    private static final String IG_PROXY_TICKER = "VWESX"; // Vanguard Long-Term Investment-Grade — real data since 2000-01
+    private static final String HY_TICKER = "VWEHX"; // Vanguard High-Yield Corporate — real USD data since 2000-01
+    private static final String IG_TICKER = "VWESX"; // Vanguard Long-Term Investment-Grade — real USD data since 2000-01
+    private static final String HY_EUR_TICKER = "IHYG.L"; // iShares € High Yield Corp Bond UCITS ETF — real EUR data since 2010-09
+    private static final String IG_EUR_TICKER = "IEAC.L"; // iShares Core € Corp Bond UCITS ETF — real EUR data since 2009-03
     private static final String SPY_TICKER = "SPY";
 
     private static final String CPI_ID = "CPIAUCSL";
@@ -104,35 +107,84 @@ public class CreditRotationService {
         this.fxRateService = fxRateService;
     }
 
-    /** Splices a real ETF's price history onto an older real mutual fund's history in the same
-     * asset class, so the combined series reaches back further than the ETF alone while using
-     * the ETF directly for every date it actually covers. The proxy's OWN daily % returns are
-     * preserved exactly for the extension period — only its LEVEL is rescaled by a single
-     * constant factor (real ETF price at the splice date ÷ proxy price at the splice date) so
-     * the two segments connect with no artificial jump. Falls back to the real series alone if
-     * either fetch comes back empty or the proxy doesn't reach the splice date. */
-    private NavigableMap<LocalDate, BigDecimal> buildSplicedCloses(String realTicker, String proxyTicker) {
-        NavigableMap<LocalDate, BigDecimal> real = yahooFinanceService.fetchAdjustedDailyCloses(realTicker);
-        if (real.isEmpty()) return real;
-        NavigableMap<LocalDate, BigDecimal> proxy = yahooFinanceService.fetchAdjustedDailyCloses(proxyTicker);
-        if (proxy.isEmpty()) return real;
-
+    /** Rescales `extension` by a single constant factor (real[realStart] ÷ extension[realStart])
+     * so it connects to `real` with no artificial jump at the splice date, then uses `extension`
+     * for every date before real's own start and `real` directly from there on. `extension`'s own
+     * daily % returns are preserved exactly — only its level is rescaled. Falls back to `real`
+     * alone if either series is empty or `extension` doesn't reach the splice date. */
+    private NavigableMap<LocalDate, BigDecimal> spliceOnto(NavigableMap<LocalDate, BigDecimal> real,
+                                                             NavigableMap<LocalDate, BigDecimal> extension) {
+        if (real.isEmpty()) return extension;
+        if (extension.isEmpty()) return real;
         LocalDate realStart = real.firstKey();
-        Map.Entry<LocalDate, BigDecimal> proxyAtSplice = proxy.floorEntry(realStart);
-        if (proxyAtSplice == null || proxyAtSplice.getValue().signum() == 0) return real;
+        Map.Entry<LocalDate, BigDecimal> extAtSplice = extension.floorEntry(realStart);
+        if (extAtSplice == null || extAtSplice.getValue().signum() == 0) return real;
 
-        BigDecimal scale = real.get(realStart).divide(proxyAtSplice.getValue(), MathContext.DECIMAL64);
+        BigDecimal scale = real.get(realStart).divide(extAtSplice.getValue(), MathContext.DECIMAL64);
         NavigableMap<LocalDate, BigDecimal> spliced = new TreeMap<>();
-        for (Map.Entry<LocalDate, BigDecimal> e : proxy.headMap(realStart, false).entrySet()) {
+        for (Map.Entry<LocalDate, BigDecimal> e : extension.headMap(realStart, false).entrySet()) {
             spliced.put(e.getKey(), e.getValue().multiply(scale, MathContext.DECIMAL64));
         }
         spliced.putAll(real);
         return spliced;
     }
 
+    /** Builds a full-history synthetic EUR price index from a USD price series, by compounding
+     * that series' own FX-adjusted daily returns starting from an arbitrary base of 1.0 — used
+     * only as the pre-real-EUR-fund EXTENSION in spliceOnto, so its absolute level never matters
+     * (spliceOnto rescales it to connect with the real EUR fund's actual level). */
+    private NavigableMap<LocalDate, BigDecimal> buildSyntheticEurSeries(NavigableMap<LocalDate, BigDecimal> usdCloses,
+                                                                         NavigableMap<LocalDate, BigDecimal> usdPerEur) {
+        NavigableMap<LocalDate, BigDecimal> synthetic = new TreeMap<>();
+        if (usdCloses.isEmpty()) return synthetic;
+        List<LocalDate> dates = new ArrayList<>(usdCloses.keySet());
+        BigDecimal level = BigDecimal.ONE;
+        synthetic.put(dates.get(0), level);
+        for (int i = 1; i < dates.size(); i++) {
+            double usdRet = usdReturn(usdCloses, dates.get(i - 1), dates.get(i));
+            double eurRet = fxAdjust(usdPerEur, dates.get(i - 1), dates.get(i), usdRet);
+            level = level.multiply(BigDecimal.valueOf(1.0 + eurRet), MathContext.DECIMAL64);
+            synthetic.put(dates.get(i), level);
+        }
+        return synthetic;
+    }
+
     @SuppressWarnings("unchecked")
     private NavigableMap<LocalDate, BigDecimal> usdPerEur() {
         return (NavigableMap<LocalDate, BigDecimal>) fxRateService.getUsdPerLocal("EUR");
+    }
+
+    /** Bundles the four price series (USD/EUR × HY/IG) plus the real-EUR-fund start dates that
+     * every request needs — built once per request/sweep instead of duplicating this fetch+splice
+     * logic in both runBacktest and sweep. */
+    private record Instruments(NavigableMap<LocalDate, BigDecimal> hyUsd, NavigableMap<LocalDate, BigDecimal> igUsd,
+                                NavigableMap<LocalDate, BigDecimal> hyEur, NavigableMap<LocalDate, BigDecimal> igEur,
+                                NavigableMap<LocalDate, BigDecimal> spy, NavigableMap<LocalDate, BigDecimal> usdPerEur,
+                                LocalDate hyEurRealStart, LocalDate igEurRealStart) {}
+
+    private Instruments loadInstruments() {
+        NavigableMap<LocalDate, BigDecimal> hyUsd = yahooFinanceService.fetchAdjustedDailyCloses(HY_TICKER);
+        NavigableMap<LocalDate, BigDecimal> igUsd = yahooFinanceService.fetchAdjustedDailyCloses(IG_TICKER);
+        NavigableMap<LocalDate, BigDecimal> hyEurReal = yahooFinanceService.fetchAdjustedDailyCloses(HY_EUR_TICKER);
+        NavigableMap<LocalDate, BigDecimal> igEurReal = yahooFinanceService.fetchAdjustedDailyCloses(IG_EUR_TICKER);
+        NavigableMap<LocalDate, BigDecimal> spy = yahooFinanceService.fetchAdjustedDailyCloses(SPY_TICKER);
+        NavigableMap<LocalDate, BigDecimal> usdPerEur = usdPerEur();
+
+        NavigableMap<LocalDate, BigDecimal> hyEur = spliceOnto(hyEurReal, buildSyntheticEurSeries(hyUsd, usdPerEur));
+        NavigableMap<LocalDate, BigDecimal> igEur = spliceOnto(igEurReal, buildSyntheticEurSeries(igUsd, usdPerEur));
+
+        return new Instruments(hyUsd, igUsd, hyEur, igEur, spy, usdPerEur,
+                hyEurReal.isEmpty() ? null : hyEurReal.firstKey(),
+                igEurReal.isEmpty() ? null : igEurReal.firstKey());
+    }
+
+    private List<LocalDate> tradingDaysFor(Instruments inst, int yearFrom, int yearTo) {
+        LocalDate rangeStart = LocalDate.of(yearFrom, 1, 1);
+        LocalDate today = LocalDate.now();
+        LocalDate rangeEnd = yearTo >= today.getYear() ? today : LocalDate.of(yearTo, 12, 31);
+        List<LocalDate> tradingDays = new ArrayList<>(inst.hyUsd().subMap(rangeStart, true, rangeEnd, true).keySet());
+        tradingDays.removeIf(d -> !inst.igUsd().containsKey(d)); // both legs must have a real price that day
+        return tradingDays;
     }
 
     public Map<String, Object> runBacktest(CreditRotationRequest req) {
@@ -143,25 +195,16 @@ public class CreditRotationService {
             throw new IllegalArgumentException("exitThreshold must be lower than enterThreshold");
         }
         FeatureMeta meta = featureMeta(req.feature);
-
-        NavigableMap<LocalDate, BigDecimal> hy = buildSplicedCloses(HY_TICKER, HY_PROXY_TICKER);
-        NavigableMap<LocalDate, BigDecimal> ig = buildSplicedCloses(IG_TICKER, IG_PROXY_TICKER);
-        NavigableMap<LocalDate, BigDecimal> spy = yahooFinanceService.fetchAdjustedDailyCloses(SPY_TICKER);
-        NavigableMap<LocalDate, BigDecimal> usdPerEur = usdPerEur();
+        Instruments inst = loadInstruments();
         NavigableMap<LocalDate, Double> feature = buildFeatureSeries(meta);
 
-        LocalDate rangeStart = LocalDate.of(req.yearFrom, 1, 1);
-        LocalDate today = LocalDate.now();
-        LocalDate rangeEnd = req.yearTo >= today.getYear() ? today : LocalDate.of(req.yearTo, 12, 31);
-
-        List<LocalDate> tradingDays = new ArrayList<>(hy.subMap(rangeStart, true, rangeEnd, true).keySet());
-        tradingDays.removeIf(d -> !ig.containsKey(d)); // both legs must have a real price that day
+        List<LocalDate> tradingDays = tradingDaysFor(inst, req.yearFrom, req.yearTo);
         if (tradingDays.size() < 2) {
-            throw new IllegalStateException("Not enough HYG/LQD (+ proxy) data for " + req.yearFrom + "-" + req.yearTo
-                    + " (spliced data starts " + hy.firstKey() + ")");
+            throw new IllegalStateException("Not enough " + HY_TICKER + "/" + IG_TICKER + " data for "
+                    + req.yearFrom + "-" + req.yearTo + " (data starts " + inst.hyUsd().firstKey() + ")");
         }
 
-        Map<String, Object> result = simulate(tradingDays, hy, ig, spy, usdPerEur, feature, req.enterThreshold, req.exitThreshold);
+        Map<String, Object> result = simulate(tradingDays, inst, feature, req.enterThreshold, req.exitThreshold);
         Map<String, Object> reqMeta = new LinkedHashMap<>();
         reqMeta.put("yearFrom", req.yearFrom);
         reqMeta.put("yearTo", req.yearTo);
@@ -171,10 +214,12 @@ public class CreditRotationService {
         reqMeta.put("exitThreshold", req.exitThreshold);
         reqMeta.put("hyTicker", HY_TICKER);
         reqMeta.put("igTicker", IG_TICKER);
-        reqMeta.put("hyProxyTicker", HY_PROXY_TICKER);
-        reqMeta.put("igProxyTicker", IG_PROXY_TICKER);
+        reqMeta.put("hyEurTicker", HY_EUR_TICKER);
+        reqMeta.put("igEurTicker", IG_EUR_TICKER);
+        reqMeta.put("hyEurRealStart", inst.hyEurRealStart() == null ? null : inst.hyEurRealStart().toString());
+        reqMeta.put("igEurRealStart", inst.igEurRealStart() == null ? null : inst.igEurRealStart().toString());
         reqMeta.put("tradingDays", tradingDays.size());
-        reqMeta.put("dataStart", hy.firstKey().toString());
+        reqMeta.put("dataStart", inst.hyUsd().firstKey().toString());
         result.put("meta", reqMeta);
         return result;
     }
@@ -194,18 +239,10 @@ public class CreditRotationService {
         if (!rankCurrency.equals("USD") && !rankCurrency.equals("EUR")) {
             throw new IllegalArgumentException("rankCurrency must be USD or EUR");
         }
-        NavigableMap<LocalDate, BigDecimal> hy = buildSplicedCloses(HY_TICKER, HY_PROXY_TICKER);
-        NavigableMap<LocalDate, BigDecimal> ig = buildSplicedCloses(IG_TICKER, IG_PROXY_TICKER);
-        NavigableMap<LocalDate, BigDecimal> spy = yahooFinanceService.fetchAdjustedDailyCloses(SPY_TICKER);
-        NavigableMap<LocalDate, BigDecimal> usdPerEur = usdPerEur();
-
-        LocalDate rangeStart = LocalDate.of(req.yearFrom, 1, 1);
-        LocalDate today = LocalDate.now();
-        LocalDate rangeEnd = req.yearTo >= today.getYear() ? today : LocalDate.of(req.yearTo, 12, 31);
-        List<LocalDate> tradingDays = new ArrayList<>(hy.subMap(rangeStart, true, rangeEnd, true).keySet());
-        tradingDays.removeIf(d -> !ig.containsKey(d));
+        Instruments inst = loadInstruments();
+        List<LocalDate> tradingDays = tradingDaysFor(inst, req.yearFrom, req.yearTo);
         if (tradingDays.size() < 2) {
-            throw new IllegalStateException("Not enough HYG/LQD (+ proxy) data for " + req.yearFrom + "-" + req.yearTo);
+            throw new IllegalStateException("Not enough " + HY_TICKER + "/" + IG_TICKER + " data for " + req.yearFrom + "-" + req.yearTo);
         }
 
         double[] enterPercentiles = {50, 60, 70, 75, 80, 85, 90, 95};
@@ -229,7 +266,7 @@ public class CreditRotationService {
                     double exitThreshold = percentile(inRangeValues, xp / 100.0);
                     if (exitThreshold >= enterThreshold) continue;
 
-                    Map<String, Object> sim = simulate(tradingDays, hy, ig, spy, usdPerEur, feature, enterThreshold, exitThreshold);
+                    Map<String, Object> sim = simulate(tradingDays, inst, feature, enterThreshold, exitThreshold);
                     @SuppressWarnings("unchecked")
                     Map<String, Object> statsByCcy = (Map<String, Object>) sim.get("stats");
                     @SuppressWarnings("unchecked")
@@ -288,14 +325,19 @@ public class CreditRotationService {
     }
 
     /** The actual day-by-day simulation shared by runBacktest and sweep — everything above this
-     * just decides WHICH feature/thresholds to feed it. Tracks USD and EUR wealth curves in
-     * parallel for every series (strategy/HY/IG/SPY): the day-by-day HOLD decision is currency-
-     * blind (driven only by the feature reading), so a single pass over the trading days is
-     * enough to produce both currencies' numbers — no need to re-simulate. */
-    private Map<String, Object> simulate(List<LocalDate> tradingDays, NavigableMap<LocalDate, BigDecimal> hy,
-                                          NavigableMap<LocalDate, BigDecimal> ig, NavigableMap<LocalDate, BigDecimal> spy,
-                                          NavigableMap<LocalDate, BigDecimal> usdPerEur,
+     * just decides WHICH feature/thresholds to feed it. The USD and EUR wealth curves are tracked
+     * in parallel for every series (strategy/HY/IG/SPY): the day-by-day HOLD decision is
+     * currency-blind (driven only by the feature reading), so a single pass over the trading days
+     * produces both currencies' numbers. The EUR leg is read directly off the (already spliced)
+     * EUR price series — real fund where it covers the date, synthetic FX conversion before
+     * that — falling back to on-the-fly FX conversion of the USD return only on a day the EUR
+     * series itself has no quote (e.g. a UK/EU holiday the US market doesn't share). */
+    private Map<String, Object> simulate(List<LocalDate> tradingDays, Instruments inst,
                                           NavigableMap<LocalDate, Double> feature, double enterThreshold, double exitThreshold) {
+        NavigableMap<LocalDate, BigDecimal> hyUsd = inst.hyUsd(), igUsd = inst.igUsd();
+        NavigableMap<LocalDate, BigDecimal> hyEur = inst.hyEur(), igEur = inst.igEur();
+        NavigableMap<LocalDate, BigDecimal> spy = inst.spy(), usdPerEur = inst.usdPerEur();
+
         Double f0 = floorValue(feature, tradingDays.get(0));
         boolean inHY = f0 != null && f0 >= enterThreshold;
 
@@ -308,17 +350,17 @@ public class CreditRotationService {
 
         Map<Integer, Map<String, Object>> cumulativeByYear = new LinkedHashMap<>();
         List<Map<String, Object>> trades = new ArrayList<>();
-        Map<String, Object> segment = openSegment(inHY, tradingDays.get(0), f0, hy, ig, usdPerEur);
+        Map<String, Object> segment = openSegment(inHY, tradingDays.get(0), f0, inst);
         double segmentMultiplierUsd = 1.0, segmentMultiplierEur = 1.0;
 
         for (int i = 1; i < tradingDays.size(); i++) {
             LocalDate prevDay = tradingDays.get(i - 1);
             LocalDate day = tradingDays.get(i);
 
-            double hyRetUsd = usdReturn(hy, prevDay, day);
-            double igRetUsd = usdReturn(ig, prevDay, day);
-            double hyRetEur = fxAdjust(usdPerEur, prevDay, day, hyRetUsd);
-            double igRetEur = fxAdjust(usdPerEur, prevDay, day, igRetUsd);
+            double hyRetUsd = usdReturn(hyUsd, prevDay, day);
+            double igRetUsd = usdReturn(igUsd, prevDay, day);
+            double hyRetEur = eurReturn(hyEur, hyUsd, usdPerEur, prevDay, day);
+            double igRetEur = eurReturn(igEur, igUsd, usdPerEur, prevDay, day);
             double stratRetUsd = inHY ? hyRetUsd : igRetUsd;
             double stratRetEur = inHY ? hyRetEur : igRetEur;
             if (inHY) daysInHY++; else daysInIG++;
@@ -333,6 +375,8 @@ public class CreditRotationService {
                 BigDecimal spyPrev = spy.get(prevDay), spyCur = spy.get(day);
                 if (spyPrev != null && spyCur != null) {
                     double spyRetUsd = spyCur.subtract(spyPrev).divide(spyPrev, MathContext.DECIMAL64).doubleValue();
+                    // SPY EUR stays FX-synthetic — it's only a contextual reference line, not one
+                    // of the two assets the strategy actually chooses between.
                     double spyRetEur = fxAdjust(usdPerEur, prevDay, day, spyRetUsd);
                     spyLedger.accrue(spyRetUsd, spyRetEur);
                 }
@@ -351,15 +395,15 @@ public class CreditRotationService {
             Double fToday = floorValue(feature, day);
             if (fToday != null && ((!inHY && fToday >= enterThreshold) || (inHY && fToday <= exitThreshold))) {
                 inHY = !inHY;
-                closeSegment(segment, day, fToday, segmentMultiplierUsd, segmentMultiplierEur, hy, ig, usdPerEur, false);
+                closeSegment(segment, day, fToday, segmentMultiplierUsd, segmentMultiplierEur, inst, false);
                 trades.add(segment);
-                segment = openSegment(inHY, day, fToday, hy, ig, usdPerEur);
+                segment = openSegment(inHY, day, fToday, inst);
                 segmentMultiplierUsd = 1.0;
                 segmentMultiplierEur = 1.0;
             }
         }
         LocalDate lastDay = tradingDays.get(tradingDays.size() - 1);
-        closeSegment(segment, lastDay, floorValue(feature, lastDay), segmentMultiplierUsd, segmentMultiplierEur, hy, ig, usdPerEur, true);
+        closeSegment(segment, lastDay, floorValue(feature, lastDay), segmentMultiplierUsd, segmentMultiplierEur, inst, true);
         trades.add(segment);
 
         double yearsElapsed = ChronoUnit.DAYS.between(tradingDays.get(0), tradingDays.get(tradingDays.size() - 1)) / 365.25;
@@ -439,35 +483,60 @@ public class CreditRotationService {
         }
     }
 
-    private Map<String, Object> openSegment(boolean hy, LocalDate entryDate, Double featureAtEntry,
-                                             NavigableMap<LocalDate, BigDecimal> hyCloses, NavigableMap<LocalDate, BigDecimal> igCloses,
-                                             NavigableMap<LocalDate, BigDecimal> usdPerEur) {
+    private Map<String, Object> openSegment(boolean hy, LocalDate entryDate, Double featureAtEntry, Instruments inst) {
         Map<String, Object> s = new LinkedHashMap<>();
         s.put("type", hy ? "HY" : "IG");
         s.put("entryDate", entryDate.toString());
         s.put("featureAtEntry", featureAtEntry);
-        // Always the real USD market price — this instrument only trades in USD. fxAtEntry is
-        // added for transparency; the trade's EUR return (tradeReturnEur, set in closeSegment)
-        // is computed day-by-day via fxAdjust in the loop above, not by converting these two
-        // price points directly.
-        s.put("entryPrice", (hy ? hyCloses.get(entryDate) : igCloses.get(entryDate)).doubleValue());
-        s.put("fxAtEntry", floorFxValue(usdPerEur, entryDate));
+        NavigableMap<LocalDate, BigDecimal> usdCloses = hy ? inst.hyUsd() : inst.igUsd();
+        NavigableMap<LocalDate, BigDecimal> eurCloses = hy ? inst.hyEur() : inst.igEur();
+        LocalDate eurRealStart = hy ? inst.hyEurRealStart() : inst.igEurRealStart();
+        s.put("entryPrice", usdCloses.get(entryDate).doubleValue());
+        Map.Entry<LocalDate, BigDecimal> eurEntry = eurCloses.floorEntry(entryDate);
+        s.put("entryPriceEur", eurEntry == null ? null : eurEntry.getValue().doubleValue());
+        s.put("eurSourceAtEntry", eurSource(entryDate, eurRealStart));
+        s.put("fxAtEntry", floorFxValue(inst.usdPerEur(), entryDate));
         return s;
     }
 
     private void closeSegment(Map<String, Object> segment, LocalDate exitDate, Double featureAtExit,
-                               double multiplierUsd, double multiplierEur,
-                               NavigableMap<LocalDate, BigDecimal> hyCloses, NavigableMap<LocalDate, BigDecimal> igCloses,
-                               NavigableMap<LocalDate, BigDecimal> usdPerEur, boolean open) {
+                               double multiplierUsd, double multiplierEur, Instruments inst, boolean open) {
         boolean isHy = "HY".equals(segment.get("type"));
+        NavigableMap<LocalDate, BigDecimal> usdCloses = isHy ? inst.hyUsd() : inst.igUsd();
+        NavigableMap<LocalDate, BigDecimal> eurCloses = isHy ? inst.hyEur() : inst.igEur();
+        LocalDate eurRealStart = isHy ? inst.hyEurRealStart() : inst.igEurRealStart();
         String dateKey = open ? "asOfDate" : "exitDate";
         segment.put(dateKey, exitDate.toString());
         if (!open) segment.put("featureAtExit", featureAtExit);
-        segment.put(open ? "asOfPrice" : "exitPrice", (isHy ? hyCloses.get(exitDate) : igCloses.get(exitDate)).doubleValue());
-        segment.put(open ? "fxAsOf" : "fxAtExit", floorFxValue(usdPerEur, exitDate));
+        segment.put(open ? "asOfPrice" : "exitPrice", usdCloses.get(exitDate).doubleValue());
+        Map.Entry<LocalDate, BigDecimal> eurExit = eurCloses.floorEntry(exitDate);
+        segment.put(open ? "asOfPriceEur" : "exitPriceEur", eurExit == null ? null : eurExit.getValue().doubleValue());
+        segment.put(open ? "eurSourceAsOf" : "eurSourceAtExit", eurSource(exitDate, eurRealStart));
+        segment.put(open ? "fxAsOf" : "fxAtExit", floorFxValue(inst.usdPerEur(), exitDate));
         segment.put("tradeReturnUsd", multiplierUsd - 1.0);
         segment.put("tradeReturnEur", multiplierEur - 1.0);
         segment.put("open", open);
+    }
+
+    /** "REAL_FUND" once a date is on/after the real EUR-denominated fund's own first date,
+     * "FX_SYNTHETIC" before that (or if the EUR fund has no data at all) — lets the UI show
+     * exactly which regime backs any given EUR number instead of leaving it implicit. */
+    private String eurSource(LocalDate date, LocalDate eurRealStart) {
+        return eurRealStart != null && !date.isBefore(eurRealStart) ? "REAL_FUND" : "FX_SYNTHETIC";
+    }
+
+    /** EUR return for one leg, read directly off its (already spliced) EUR price series — real
+     * fund where it covers the date, synthetic FX-converted level before that. Falls back to an
+     * on-the-fly FX conversion of the USD return only if the EUR series itself is missing a quote
+     * for prevDay or day (e.g. a UK/EU holiday the US market doesn't share), so a calendar
+     * mismatch never breaks a day's return instead of just using the next best information. */
+    private double eurReturn(NavigableMap<LocalDate, BigDecimal> eurCloses, NavigableMap<LocalDate, BigDecimal> usdCloses,
+                              NavigableMap<LocalDate, BigDecimal> usdPerEur, LocalDate prevDay, LocalDate day) {
+        BigDecimal p0 = eurCloses.get(prevDay), p1 = eurCloses.get(day);
+        if (p0 != null && p1 != null) {
+            return p1.subtract(p0).divide(p0, MathContext.DECIMAL64).doubleValue();
+        }
+        return fxAdjust(usdPerEur, prevDay, day, usdReturn(usdCloses, prevDay, day));
     }
 
     /** A EUR investor converts EUR→USD to buy a USD asset and back on the way out, so their
