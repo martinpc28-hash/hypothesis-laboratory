@@ -45,6 +45,7 @@ function featureValue(v, key) {
 export default function CreditRotationTab({ setStatus }) {
   const [yearFrom, setYearFrom] = useState(DEFAULT_YEAR_FROM);
   const [yearTo, setYearTo] = useState(DEFAULT_YEAR_TO);
+  const [currency, setCurrency] = useState("USD");
   const [feature, setFeature] = useState("VIX");
   const [enterThreshold, setEnterThreshold] = useState(30);
   const [exitThreshold, setExitThreshold] = useState(15);
@@ -61,6 +62,7 @@ export default function CreditRotationTab({ setStatus }) {
       const body = {
         yearFrom,
         yearTo,
+        currency,
         feature: overrides?.feature ?? feature,
         enterThreshold: overrides?.enterThreshold ?? enterThreshold,
         exitThreshold: overrides?.exitThreshold ?? exitThreshold,
@@ -77,7 +79,7 @@ export default function CreditRotationTab({ setStatus }) {
   async function runSweep() {
     setSweepLoading(true);
     try {
-      const res = await api.runCreditRotationSweep({ yearFrom, yearTo, rankBy });
+      const res = await api.runCreditRotationSweep({ yearFrom, yearTo, currency, rankBy });
       setSweepResult(res);
     } catch (e) {
       setStatus({ type: "error", text: `Credit rotation sweep failed: ${e.message}` });
@@ -118,6 +120,13 @@ export default function CreditRotationTab({ setStatus }) {
             <input style={ui.input} type="number" value={yearTo} onChange={(e) => setYearTo(Number(e.target.value))} />
           </label>
           <label style={ui.label}>
+            Moneda
+            <select style={ui.input} value={currency} onChange={(e) => setCurrency(e.target.value)}>
+              <option value="USD">USD (sin conversión)</option>
+              <option value="EUR">EUR (expuesto a USD/EUR)</option>
+            </select>
+          </label>
+          <label style={ui.label}>
             Variable macro
             <select style={ui.input} value={feature} onChange={(e) => setFeature(e.target.value)}>
               {FEATURES.map((f) => (
@@ -153,6 +162,8 @@ export default function CreditRotationTab({ setStatus }) {
         </div>
         <p style={{ ...ui.muted, marginTop: 8 }}>
           {FEATURES.find((f) => f.key === feature)?.hint} — unidad: {FEATURES.find((f) => f.key === feature)?.unit || "nivel"}
+          {currency === "EUR" &&
+            " · En EUR: retorno real de un inversor en euros comprando HYG/LQD en USD, con exposición cambiaria real (sin cobertura) — se le suma el movimiento EUR/USD del período, no es una versión sintética."}
         </p>
       </div>
 
@@ -250,7 +261,9 @@ function CreditRotationResult({ result }) {
         </h3>
         <p style={ui.cardSubtitle}>
           {meta.featureLabel} · entra en HYG con lectura ≥ {meta.enterThreshold} · sale a LQD con lectura ≤{" "}
-          {meta.exitThreshold} · datos desde {meta.dataStart} (inicio real de HYG)
+          {meta.exitThreshold} · datos desde {meta.dataStart} (inicio real de HYG) · cuenta en{" "}
+          <strong>{meta.currency}</strong>
+          {meta.currency === "EUR" && " (expuesto a USD/EUR, sin cobertura)"}
         </p>
         <div style={ui.tableScroll}>
           <table style={ui.table}>
@@ -383,8 +396,30 @@ function CreditRotationResult({ result }) {
                   <strong>${Number(tradeAudit.open ? tradeAudit.asOfPrice : tradeAudit.exitPrice).toFixed(2)}</strong>
                 </td>
               </tr>
+              {tradeAudit.fxAtEntry !== undefined && (
+                <>
+                  <tr>
+                    <td style={{ padding: "3px 0", color: colors.textMuted }}>USD/EUR en la compra</td>
+                    <td style={{ padding: "3px 0", textAlign: "right" }}>{Number(tradeAudit.fxAtEntry).toFixed(4)}</td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: "3px 0", color: colors.textMuted }}>
+                      USD/EUR {tradeAudit.open ? "actual" : "en la venta"}
+                    </td>
+                    <td style={{ padding: "3px 0", textAlign: "right" }}>
+                      {Number(tradeAudit.open ? tradeAudit.fxAsOf : tradeAudit.fxAtExit).toFixed(4)}
+                    </td>
+                  </tr>
+                </>
+              )}
             </tbody>
           </table>
+          {tradeAudit.fxAtEntry !== undefined && (
+            <p style={{ ...ui.muted, marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${colors.border}` }}>
+              El retorno del tramo ({pct(tradeAudit.tradeReturn, 2)}) incluye el movimiento del precio en USD más el
+              movimiento real de USD/EUR en el mismo período — no hay cobertura cambiaria en esta versión.
+            </p>
+          )}
           <button style={{ ...ui.button("secondary"), marginTop: 10 }} onClick={() => setTradeAudit(null)}>
             Cerrar
           </button>

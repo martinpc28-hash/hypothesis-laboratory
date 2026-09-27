@@ -85,10 +85,25 @@ public class CreditRotationService {
 
     private final FredClient fredClient;
     private final YahooFinanceService yahooFinanceService;
+    private final FxRateService fxRateService;
 
-    public CreditRotationService(FredClient fredClient, YahooFinanceService yahooFinanceService) {
+    public CreditRotationService(FredClient fredClient, YahooFinanceService yahooFinanceService, FxRateService fxRateService) {
         this.fredClient = fredClient;
         this.yahooFinanceService = yahooFinanceService;
+        this.fxRateService = fxRateService;
+    }
+
+    private String normalizeCurrency(String currency) {
+        String c = currency == null ? "USD" : currency.toUpperCase();
+        if (!c.equals("USD") && !c.equals("EUR")) {
+            throw new IllegalArgumentException("currency must be USD or EUR");
+        }
+        return c;
+    }
+
+    @SuppressWarnings("unchecked")
+    private NavigableMap<LocalDate, BigDecimal> usdPerEurFor(String currency) {
+        return currency.equals("EUR") ? (NavigableMap<LocalDate, BigDecimal>) fxRateService.getUsdPerLocal("EUR") : null;
     }
 
     @SuppressWarnings("unchecked")
@@ -99,11 +114,13 @@ public class CreditRotationService {
         if (req.exitThreshold >= req.enterThreshold) {
             throw new IllegalArgumentException("exitThreshold must be lower than enterThreshold");
         }
+        String currency = normalizeCurrency(req.currency);
         FeatureMeta meta = featureMeta(req.feature);
 
         NavigableMap<LocalDate, BigDecimal> hy = yahooFinanceService.fetchAdjustedDailyCloses(HY_TICKER);
         NavigableMap<LocalDate, BigDecimal> ig = yahooFinanceService.fetchAdjustedDailyCloses(IG_TICKER);
         NavigableMap<LocalDate, BigDecimal> spy = yahooFinanceService.fetchAdjustedDailyCloses(SPY_TICKER);
+        NavigableMap<LocalDate, BigDecimal> usdPerEur = usdPerEurFor(currency);
         NavigableMap<LocalDate, Double> feature = buildFeatureSeries(meta);
 
         LocalDate rangeStart = LocalDate.of(req.yearFrom, 1, 1);
@@ -117,10 +134,11 @@ public class CreditRotationService {
                     + " (HYG only goes back to " + hy.firstKey() + ")");
         }
 
-        Map<String, Object> result = simulate(tradingDays, hy, ig, spy, feature, req.enterThreshold, req.exitThreshold);
+        Map<String, Object> result = simulate(tradingDays, hy, ig, spy, usdPerEur, feature, req.enterThreshold, req.exitThreshold);
         Map<String, Object> reqMeta = new LinkedHashMap<>();
         reqMeta.put("yearFrom", req.yearFrom);
         reqMeta.put("yearTo", req.yearTo);
+        reqMeta.put("currency", currency);
         reqMeta.put("feature", meta.key());
         reqMeta.put("featureLabel", meta.label());
         reqMeta.put("enterThreshold", req.enterThreshold);
@@ -143,9 +161,11 @@ public class CreditRotationService {
         if (req.yearFrom > req.yearTo) {
             throw new IllegalArgumentException("yearFrom must be <= yearTo");
         }
+        String currency = normalizeCurrency(req.currency);
         NavigableMap<LocalDate, BigDecimal> hy = yahooFinanceService.fetchAdjustedDailyCloses(HY_TICKER);
         NavigableMap<LocalDate, BigDecimal> ig = yahooFinanceService.fetchAdjustedDailyCloses(IG_TICKER);
         NavigableMap<LocalDate, BigDecimal> spy = yahooFinanceService.fetchAdjustedDailyCloses(SPY_TICKER);
+        NavigableMap<LocalDate, BigDecimal> usdPerEur = usdPerEurFor(currency);
 
         LocalDate rangeStart = LocalDate.of(req.yearFrom, 1, 1);
         LocalDate today = LocalDate.now();
@@ -177,7 +197,7 @@ public class CreditRotationService {
                     double exitThreshold = percentile(inRangeValues, xp / 100.0);
                     if (exitThreshold >= enterThreshold) continue;
 
-                    Map<String, Object> sim = simulate(tradingDays, hy, ig, spy, feature, enterThreshold, exitThreshold);
+                    Map<String, Object> sim = simulate(tradingDays, hy, ig, spy, usdPerEur, feature, enterThreshold, exitThreshold);
                     @SuppressWarnings("unchecked")
                     Map<String, Object> stats = (Map<String, Object>) ((Map<String, Object>) sim.get("stats")).get("strategy");
                     double cagr = (double) stats.get("cagr");
@@ -208,6 +228,7 @@ public class CreditRotationService {
         Map<String, Object> reqMeta = new LinkedHashMap<>();
         reqMeta.put("yearFrom", req.yearFrom);
         reqMeta.put("yearTo", req.yearTo);
+        reqMeta.put("currency", currency);
         reqMeta.put("rankBy", rankBy);
         reqMeta.put("combinationsTested", allResults.size());
         result.put("meta", reqMeta);
@@ -233,6 +254,7 @@ public class CreditRotationService {
      * just decides WHICH feature/thresholds to feed it. */
     private Map<String, Object> simulate(List<LocalDate> tradingDays, NavigableMap<LocalDate, BigDecimal> hy,
                                           NavigableMap<LocalDate, BigDecimal> ig, NavigableMap<LocalDate, BigDecimal> spy,
+                                          NavigableMap<LocalDate, BigDecimal> usdPerEur,
                                           NavigableMap<LocalDate, Double> feature, double enterThreshold, double exitThreshold) {
         Double f0 = floorValue(feature, tradingDays.get(0));
         boolean inHY = f0 != null && f0 >= enterThreshold;
@@ -250,15 +272,15 @@ public class CreditRotationService {
 
         Map<Integer, Map<String, Object>> cumulativeByYear = new LinkedHashMap<>();
         List<Map<String, Object>> trades = new ArrayList<>();
-        Map<String, Object> segment = openSegment(inHY, tradingDays.get(0), f0, hy, ig);
+        Map<String, Object> segment = openSegment(inHY, tradingDays.get(0), f0, hy, ig, usdPerEur);
         double segmentMultiplier = 1.0;
 
         for (int i = 1; i < tradingDays.size(); i++) {
             LocalDate prevDay = tradingDays.get(i - 1);
             LocalDate day = tradingDays.get(i);
 
-            double hyRet = usdReturn(hy, prevDay, day);
-            double igRet = usdReturn(ig, prevDay, day);
+            double hyRet = fxAdjust(usdPerEur, prevDay, day, usdReturn(hy, prevDay, day));
+            double igRet = fxAdjust(usdPerEur, prevDay, day, usdReturn(ig, prevDay, day));
             double stratRet = inHY ? hyRet : igRet;
             if (inHY) daysInHY++; else daysInIG++;
             segmentMultiplier *= 1.0 + stratRet;
@@ -281,7 +303,8 @@ public class CreditRotationService {
             if (includeSpy) {
                 BigDecimal spyPrev = spy.get(prevDay), spyCur = spy.get(day);
                 if (spyPrev != null && spyCur != null) {
-                    double spyRet = spyCur.subtract(spyPrev).divide(spyPrev, MathContext.DECIMAL64).doubleValue();
+                    double spyRetUsd = spyCur.subtract(spyPrev).divide(spyPrev, MathContext.DECIMAL64).doubleValue();
+                    double spyRet = fxAdjust(usdPerEur, prevDay, day, spyRetUsd);
                     spyWealth *= 1.0 + spyRet;
                     spyPeak = Math.max(spyPeak, spyWealth);
                     spyMaxDD = Math.min(spyMaxDD, (spyWealth - spyPeak) / spyPeak);
@@ -298,14 +321,14 @@ public class CreditRotationService {
             Double fToday = floorValue(feature, day);
             if (fToday != null && ((!inHY && fToday >= enterThreshold) || (inHY && fToday <= exitThreshold))) {
                 inHY = !inHY;
-                closeSegment(segment, day, fToday, segmentMultiplier, hy, ig, false);
+                closeSegment(segment, day, fToday, segmentMultiplier, hy, ig, usdPerEur, false);
                 trades.add(segment);
-                segment = openSegment(inHY, day, fToday, hy, ig);
+                segment = openSegment(inHY, day, fToday, hy, ig, usdPerEur);
                 segmentMultiplier = 1.0;
             }
         }
         LocalDate lastDay = tradingDays.get(tradingDays.size() - 1);
-        closeSegment(segment, lastDay, floorValue(feature, lastDay), segmentMultiplier, hy, ig, true);
+        closeSegment(segment, lastDay, floorValue(feature, lastDay), segmentMultiplier, hy, ig, usdPerEur, true);
         trades.add(segment);
 
         double yearsElapsed = ChronoUnit.DAYS.between(tradingDays.get(0), tradingDays.get(tradingDays.size() - 1)) / 365.25;
@@ -330,24 +353,49 @@ public class CreditRotationService {
     }
 
     private Map<String, Object> openSegment(boolean hy, LocalDate entryDate, Double featureAtEntry,
-                                             NavigableMap<LocalDate, BigDecimal> hyCloses, NavigableMap<LocalDate, BigDecimal> igCloses) {
+                                             NavigableMap<LocalDate, BigDecimal> hyCloses, NavigableMap<LocalDate, BigDecimal> igCloses,
+                                             NavigableMap<LocalDate, BigDecimal> usdPerEur) {
         Map<String, Object> s = new LinkedHashMap<>();
         s.put("type", hy ? "HY" : "IG");
         s.put("entryDate", entryDate.toString());
         s.put("featureAtEntry", featureAtEntry);
+        // Always the real USD market price — this instrument only trades in USD. usdPerEur is
+        // just added for transparency in EUR mode; the trade's return (tradeReturn, set in
+        // closeSegment) is what's actually computed in EUR terms, via fxAdjust in the day-by-day
+        // loop above, not by converting these two price points directly.
         s.put("entryPrice", (hy ? hyCloses.get(entryDate) : igCloses.get(entryDate)).doubleValue());
+        if (usdPerEur != null) s.put("fxAtEntry", floorFxValue(usdPerEur, entryDate));
         return s;
     }
 
     private void closeSegment(Map<String, Object> segment, LocalDate exitDate, Double featureAtExit, double multiplier,
-                               NavigableMap<LocalDate, BigDecimal> hyCloses, NavigableMap<LocalDate, BigDecimal> igCloses, boolean open) {
+                               NavigableMap<LocalDate, BigDecimal> hyCloses, NavigableMap<LocalDate, BigDecimal> igCloses,
+                               NavigableMap<LocalDate, BigDecimal> usdPerEur, boolean open) {
         boolean isHy = "HY".equals(segment.get("type"));
         String dateKey = open ? "asOfDate" : "exitDate";
         segment.put(dateKey, exitDate.toString());
         if (!open) segment.put("featureAtExit", featureAtExit);
         segment.put(open ? "asOfPrice" : "exitPrice", (isHy ? hyCloses.get(exitDate) : igCloses.get(exitDate)).doubleValue());
+        if (usdPerEur != null) segment.put(open ? "fxAsOf" : "fxAtExit", floorFxValue(usdPerEur, exitDate));
         segment.put("tradeReturn", multiplier - 1.0);
         segment.put("open", open);
+    }
+
+    /** A EUR investor converts EUR→USD to buy a USD asset and back on the way out, so their
+     * return also carries the EUR/USD move: ret_eur = (fx0/fx1) × (1+ret_usd) − 1, where fx is
+     * "USD per 1 EUR". Same formula as VixTimingService's fxAdjust. No-op (returns usdReturn
+     * unchanged) when usdPerEur is null (USD mode) or a quote is missing for either day. */
+    private double fxAdjust(NavigableMap<LocalDate, BigDecimal> usdPerEur, LocalDate prevDay, LocalDate day, double usdReturn) {
+        if (usdPerEur == null) return usdReturn;
+        Double fx0 = floorFxValue(usdPerEur, prevDay);
+        Double fx1 = floorFxValue(usdPerEur, day);
+        if (fx0 == null || fx1 == null) return usdReturn;
+        return (fx0 / fx1) * (1.0 + usdReturn) - 1.0;
+    }
+
+    private Double floorFxValue(NavigableMap<LocalDate, BigDecimal> series, LocalDate asOf) {
+        Map.Entry<LocalDate, BigDecimal> e = series.floorEntry(asOf);
+        return e == null ? null : e.getValue().doubleValue();
     }
 
     private Map<String, Object> statBlock(double finalWealth, double maxDrawdown, List<Double> dailyReturns, double yearsElapsed) {
