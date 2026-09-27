@@ -12,9 +12,10 @@ const auditableCell = {
 };
 
 const CURRENT_YEAR = new Date().getFullYear();
-// HYG (the high-yield leg) only starts trading 2007-04 — earlier years have no real data, so
-// this is the true start of what this strategy can be tested on, not an arbitrary round number.
-const DEFAULT_YEAR_FROM = 2007;
+// Real ETF data (HYG/LQD) only starts 2007/2002 — years before that are covered by splicing onto
+// VWEHX/VWESX (real Vanguard mutual funds in the same asset class, data since 2000-01), so 2000
+// is the true start of what this strategy can be tested on, matching the rest of this project.
+const DEFAULT_YEAR_FROM = 2000;
 const DEFAULT_YEAR_TO = CURRENT_YEAR;
 
 // Mirrors CreditRotationService.FEATURES on the backend — kept here as plain labels/units for
@@ -45,7 +46,6 @@ function featureValue(v, key) {
 export default function CreditRotationTab({ setStatus }) {
   const [yearFrom, setYearFrom] = useState(DEFAULT_YEAR_FROM);
   const [yearTo, setYearTo] = useState(DEFAULT_YEAR_TO);
-  const [currency, setCurrency] = useState("USD");
   const [feature, setFeature] = useState("VIX");
   const [enterThreshold, setEnterThreshold] = useState(30);
   const [exitThreshold, setExitThreshold] = useState(15);
@@ -55,6 +55,7 @@ export default function CreditRotationTab({ setStatus }) {
   const [sweepLoading, setSweepLoading] = useState(false);
   const [sweepResult, setSweepResult] = useState(null);
   const [rankBy, setRankBy] = useState("RISK_ADJUSTED");
+  const [rankCurrency, setRankCurrency] = useState("USD");
 
   async function run(overrides) {
     setLoading(true);
@@ -62,7 +63,6 @@ export default function CreditRotationTab({ setStatus }) {
       const body = {
         yearFrom,
         yearTo,
-        currency,
         feature: overrides?.feature ?? feature,
         enterThreshold: overrides?.enterThreshold ?? enterThreshold,
         exitThreshold: overrides?.exitThreshold ?? exitThreshold,
@@ -79,7 +79,7 @@ export default function CreditRotationTab({ setStatus }) {
   async function runSweep() {
     setSweepLoading(true);
     try {
-      const res = await api.runCreditRotationSweep({ yearFrom, yearTo, currency, rankBy });
+      const res = await api.runCreditRotationSweep({ yearFrom, yearTo, rankBy, rankCurrency });
       setSweepResult(res);
     } catch (e) {
       setStatus({ type: "error", text: `Credit rotation sweep failed: ${e.message}` });
@@ -105,9 +105,14 @@ export default function CreditRotationTab({ setStatus }) {
           en {exitThreshold} o menos. Misma convención en las 7 variables: "entra en HY con una lectura ALTA, sale a
           IG con una lectura BAJA" — igual que ya se validó para el VIX en la pestaña VIX Timing — para no imponer a
           mano qué dirección "debería" funcionar en cada variable y dejar que la búsqueda de abajo lo decida con
-          datos. La decisión de cada día usa el cierre del día anterior, nunca el del mismo día. HYG y LQD usan
-          precio ajustado por dividendos/cupones (no solo precio) — en bonos, la mayor parte del retorno es la
-          distribución, no la apreciación del precio.
+          datos. La decisión de cada día usa el cierre del día anterior, nunca el del mismo día. Todos los resultados
+          se dan siempre en USD y en EUR por separado, nunca uno solo.
+        </p>
+        <p style={ui.cardSubtitle}>
+          HYG/LQD solo tienen datos reales desde 2007/2002 — para llegar a 2000 se empalman con fondos Vanguard
+          reales del mismo tipo de activo (VWEHX para high yield, VWESX para investment grade, ambos con historia
+          real desde 2000), no una fórmula sintética. Usan precio ajustado por dividendos/cupones — en bonos, la
+          mayor parte del retorno es la distribución, no la apreciación del precio.
         </p>
 
         <div style={ui.form}>
@@ -118,13 +123,6 @@ export default function CreditRotationTab({ setStatus }) {
           <label style={ui.label}>
             Año hasta
             <input style={ui.input} type="number" value={yearTo} onChange={(e) => setYearTo(Number(e.target.value))} />
-          </label>
-          <label style={ui.label}>
-            Moneda
-            <select style={ui.input} value={currency} onChange={(e) => setCurrency(e.target.value)}>
-              <option value="USD">USD (sin conversión)</option>
-              <option value="EUR">EUR (expuesto a USD/EUR)</option>
-            </select>
           </label>
           <label style={ui.label}>
             Variable macro
@@ -162,8 +160,6 @@ export default function CreditRotationTab({ setStatus }) {
         </div>
         <p style={{ ...ui.muted, marginTop: 8 }}>
           {FEATURES.find((f) => f.key === feature)?.hint} — unidad: {FEATURES.find((f) => f.key === feature)?.unit || "nivel"}
-          {currency === "EUR" &&
-            " · En EUR: retorno real de un inversor en euros comprando HYG/LQD en USD, con exposición cambiaria real (sin cobertura) — se le suma el movimiento EUR/USD del período, no es una versión sintética."}
         </p>
       </div>
 
@@ -172,10 +168,10 @@ export default function CreditRotationTab({ setStatus }) {
         <p style={ui.cardSubtitle}>
           Prueba las 7 variables candidatas × una grilla de umbrales de entrada/salida basada en los percentiles
           propios de cada variable en el rango elegido, y ranquea todas las combinaciones probadas — mismo espíritu
-          que el "Monte Carlo" combinatorio de Seasonality, aplicado a esta estrategia continua. Ojo con las filas de
-          pocas operaciones ("trades"): una combinación con 1 sola operación no está probando una regla de rotación,
-          solo eligió con el diario cuál de los dos activos ganó en todo el período — mirá el conteo de operaciones,
-          no solo el ranking.
+          que el "Monte Carlo" combinatorio de Seasonality, aplicado a esta estrategia continua. Cada fila muestra el
+          resultado en USD y en EUR; "Ranquear en" solo decide cuál de los dos ordena el ranking. Ojo con las filas
+          de pocas operaciones ("trades"): una combinación con 1 sola operación no está probando una regla de
+          rotación, solo eligió con el diario cuál de los dos activos ganó en todo el período.
         </p>
         <div style={ui.form}>
           <label style={ui.label}>
@@ -186,6 +182,13 @@ export default function CreditRotationTab({ setStatus }) {
               <option value="TOTAL_RETURN">Retorno total</option>
             </select>
           </label>
+          <label style={ui.label}>
+            Ranquear en
+            <select style={ui.input} value={rankCurrency} onChange={(e) => setRankCurrency(e.target.value)}>
+              <option value="USD">USD</option>
+              <option value="EUR">EUR</option>
+            </select>
+          </label>
           <button style={ui.button("secondary")} onClick={runSweep} disabled={sweepLoading}>
             {sweepLoading ? "Buscando…" : "Buscar mejor combinación"}
           </button>
@@ -193,17 +196,21 @@ export default function CreditRotationTab({ setStatus }) {
 
         {sweepResult && (
           <div style={{ ...ui.tableScroll, marginTop: 16 }}>
-            <p style={ui.muted}>{sweepResult.meta.combinationsTested} combinaciones probadas.</p>
+            <p style={ui.muted}>
+              {sweepResult.meta.combinationsTested} combinaciones probadas · ranking en {sweepResult.meta.rankCurrency}.
+            </p>
             <table style={ui.table}>
               <thead>
                 <tr>
                   <th style={ui.th}>Variable</th>
                   <th style={ui.th}>Entra en HY (≥)</th>
                   <th style={ui.th}>Sale a IG (≤)</th>
-                  <th style={ui.th}>CAGR</th>
-                  <th style={ui.th}>Volatilidad</th>
-                  <th style={ui.th}>Max. drawdown</th>
-                  <th style={ui.th}>Retorno total</th>
+                  <th style={ui.th}>CAGR (USD)</th>
+                  <th style={ui.th}>CAGR (EUR)</th>
+                  <th style={ui.th}>Vol. (USD)</th>
+                  <th style={ui.th}>Vol. (EUR)</th>
+                  <th style={ui.th}>Max. DD (USD)</th>
+                  <th style={ui.th}>Max. DD (EUR)</th>
                   <th style={ui.th}>Operaciones</th>
                   <th style={ui.th}></th>
                 </tr>
@@ -214,12 +221,16 @@ export default function CreditRotationTab({ setStatus }) {
                     <td style={ui.td}>{featureLabel(r.feature)}</td>
                     <td style={ui.td}>{featureValue(r.enterThreshold, r.feature)}</td>
                     <td style={ui.td}>{featureValue(r.exitThreshold, r.feature)}</td>
-                    <td style={{ ...ui.td, color: r.cagr >= 0 ? colors.success : colors.danger, fontWeight: 700 }}>
-                      {pct(r.cagr)}
+                    <td style={{ ...ui.td, color: r.usd.cagr >= 0 ? colors.success : colors.danger, fontWeight: 700 }}>
+                      {pct(r.usd.cagr)}
                     </td>
-                    <td style={ui.td}>{pct(r.volatility)}</td>
-                    <td style={{ ...ui.td, color: colors.danger }}>{pct(r.maxDrawdown)}</td>
-                    <td style={ui.td}>{pct(r.totalReturn)}</td>
+                    <td style={{ ...ui.td, color: r.eur.cagr >= 0 ? colors.success : colors.danger, fontWeight: 700 }}>
+                      {pct(r.eur.cagr)}
+                    </td>
+                    <td style={ui.td}>{pct(r.usd.volatility)}</td>
+                    <td style={ui.td}>{pct(r.eur.volatility)}</td>
+                    <td style={{ ...ui.td, color: colors.danger }}>{pct(r.usd.maxDrawdown)}</td>
+                    <td style={{ ...ui.td, color: colors.danger }}>{pct(r.eur.maxDrawdown)}</td>
                     <td style={{ ...ui.td, color: r.tradesCount <= 1 ? colors.warning : colors.text }}>
                       {r.tradesCount}
                       {r.tradesCount <= 1 && " ⚠"}
@@ -242,15 +253,39 @@ export default function CreditRotationTab({ setStatus }) {
   );
 }
 
+function StatsRow({ label, usd, eur }) {
+  return (
+    <tr>
+      <td style={ui.td}>{label}</td>
+      <td style={{ ...ui.td, color: usd.totalReturn >= 0 ? colors.success : colors.danger, fontWeight: 700 }}>
+        {pct(usd.totalReturn)}
+      </td>
+      <td style={{ ...ui.td, color: usd.cagr >= 0 ? colors.success : colors.danger }}>{pct(usd.cagr)}</td>
+      <td style={ui.td}>{pct(usd.volatility)}</td>
+      <td style={{ ...ui.td, color: colors.danger }}>{pct(usd.maxDrawdown)}</td>
+      <td style={{ ...ui.td, color: eur.totalReturn >= 0 ? colors.success : colors.danger, fontWeight: 700, borderLeft: `1px solid ${colors.border}` }}>
+        {pct(eur.totalReturn)}
+      </td>
+      <td style={{ ...ui.td, color: eur.cagr >= 0 ? colors.success : colors.danger }}>{pct(eur.cagr)}</td>
+      <td style={ui.td}>{pct(eur.volatility)}</td>
+      <td style={{ ...ui.td, color: colors.danger }}>{pct(eur.maxDrawdown)}</td>
+    </tr>
+  );
+}
+
 function CreditRotationResult({ result }) {
   const { meta, stats, cumulative, spyAvailable, trades, tradesCount, daysInHy, daysInIg, pctTimeInHy } = result;
   const [tradeAudit, setTradeAudit] = useState(null);
 
   const series = [
-    { key: "cumulativeStrategy", label: "Rotación (estrategia)", color: colors.success },
-    { key: "cumulativeHy", label: "HYG (buy & hold)", color: colors.primary },
-    { key: "cumulativeIg", label: "LQD (buy & hold)", color: colors.textMuted },
-    ...(spyAvailable ? [{ key: "cumulativeSp500", label: "S&P 500 (referencia)", color: colors.warning }] : []),
+    { key: "cumulativeStrategyUsd", label: "Rotación (USD)", color: colors.success },
+    { key: "cumulativeStrategyEur", label: "Rotación (EUR)", color: colors.primary },
+    ...(spyAvailable
+      ? [
+          { key: "cumulativeSp500Usd", label: "S&P 500 (USD, referencia)", color: colors.warning },
+          { key: "cumulativeSp500Eur", label: "S&P 500 (EUR, referencia)", color: colors.textMuted },
+        ]
+      : []),
   ];
 
   return (
@@ -261,58 +296,48 @@ function CreditRotationResult({ result }) {
         </h3>
         <p style={ui.cardSubtitle}>
           {meta.featureLabel} · entra en HYG con lectura ≥ {meta.enterThreshold} · sale a LQD con lectura ≤{" "}
-          {meta.exitThreshold} · datos desde {meta.dataStart} (inicio real de HYG) · cuenta en{" "}
-          <strong>{meta.currency}</strong>
-          {meta.currency === "EUR" && " (expuesto a USD/EUR, sin cobertura)"}
+          {meta.exitThreshold} · datos desde {meta.dataStart} ({meta.hyProxyTicker}/{meta.igProxyTicker} hasta el
+          inicio real de {meta.hyTicker}/{meta.igTicker}, luego los ETFs directamente)
         </p>
         <div style={ui.tableScroll}>
           <table style={ui.table}>
             <thead>
               <tr>
                 <th style={ui.th}>Serie</th>
+                <th style={ui.th} colSpan={4}>
+                  USD (nativa)
+                </th>
+                <th style={{ ...ui.th, borderLeft: `1px solid ${colors.border}` }} colSpan={4}>
+                  EUR (expuesto a USD/EUR, sin cobertura)
+                </th>
+              </tr>
+              <tr>
+                <th style={ui.th}></th>
                 <th style={ui.th}>Retorno total</th>
                 <th style={ui.th}>CAGR</th>
-                <th style={ui.th}>Volatilidad anualizada</th>
-                <th style={ui.th}>Máximo drawdown</th>
+                <th style={ui.th}>Vol. anualizada</th>
+                <th style={ui.th}>Máx. drawdown</th>
+                <th style={{ ...ui.th, borderLeft: `1px solid ${colors.border}` }}>Retorno total</th>
+                <th style={ui.th}>CAGR</th>
+                <th style={ui.th}>Vol. anualizada</th>
+                <th style={ui.th}>Máx. drawdown</th>
               </tr>
             </thead>
             <tbody>
-              <tr>
-                <td style={ui.td}>Rotación (estrategia)</td>
-                <td style={ui.td}>{pct(stats.strategy.totalReturn)}</td>
-                <td style={ui.td}>{pct(stats.strategy.cagr)}</td>
-                <td style={ui.td}>{pct(stats.strategy.volatility)}</td>
-                <td style={ui.td}>{pct(stats.strategy.maxDrawdown)}</td>
-              </tr>
-              <tr>
-                <td style={ui.td}>HYG (buy &amp; hold)</td>
-                <td style={ui.td}>{pct(stats.hy.totalReturn)}</td>
-                <td style={ui.td}>{pct(stats.hy.cagr)}</td>
-                <td style={ui.td}>{pct(stats.hy.volatility)}</td>
-                <td style={ui.td}>{pct(stats.hy.maxDrawdown)}</td>
-              </tr>
-              <tr>
-                <td style={ui.td}>LQD (buy &amp; hold)</td>
-                <td style={ui.td}>{pct(stats.ig.totalReturn)}</td>
-                <td style={ui.td}>{pct(stats.ig.cagr)}</td>
-                <td style={ui.td}>{pct(stats.ig.volatility)}</td>
-                <td style={ui.td}>{pct(stats.ig.maxDrawdown)}</td>
-              </tr>
+              <StatsRow label="Rotación (estrategia)" usd={stats.usd.strategy} eur={stats.eur.strategy} />
+              <StatsRow label="HYG (buy & hold)" usd={stats.usd.hy} eur={stats.eur.hy} />
+              <StatsRow label="LQD (buy & hold)" usd={stats.usd.ig} eur={stats.eur.ig} />
               {spyAvailable && (
-                <tr>
-                  <td style={ui.td}>S&amp;P 500 (referencia, no es la alternativa real)</td>
-                  <td style={ui.td}>{pct(stats.spy.totalReturn)}</td>
-                  <td style={ui.td}>{pct(stats.spy.cagr)}</td>
-                  <td style={ui.td}>{pct(stats.spy.volatility)}</td>
-                  <td style={ui.td}>{pct(stats.spy.maxDrawdown)}</td>
-                </tr>
+                <StatsRow label="S&P 500 (referencia, no es la alternativa real)" usd={stats.usd.spy} eur={stats.eur.spy} />
               )}
             </tbody>
           </table>
         </div>
         <p style={{ ...ui.muted, marginTop: 8 }}>
           El S&amp;P 500 se muestra solo como referencia de contexto (renta variable vs. renta fija) — la decisión
-          real que esta estrategia toma es entre HYG y LQD, no contra acciones.
+          real que esta estrategia toma es entre HYG y LQD, no contra acciones. La columna EUR es el retorno real de
+          un inversor en euros comprando estos instrumentos en USD, con exposición cambiaria real (sin cobertura) —
+          se le suma el movimiento EUR/USD del período, no es una versión sintética.
         </p>
         <div style={{ ...ui.statGrid, marginTop: 16 }}>
           <div style={ui.statCard}>
@@ -349,7 +374,8 @@ function CreditRotationResult({ result }) {
                 <th style={ui.th}>{meta.featureLabel} entrada</th>
                 <th style={ui.th}>Salida</th>
                 <th style={ui.th}>{meta.featureLabel} salida</th>
-                <th style={ui.th}>Retorno del tramo</th>
+                <th style={ui.th}>Retorno (USD)</th>
+                <th style={ui.th}>Retorno (EUR)</th>
               </tr>
             </thead>
             <tbody>
@@ -365,7 +391,10 @@ function CreditRotationResult({ result }) {
                   <td style={ui.td}>{t.open ? "Abierta (sigue hoy)" : t.exitDate}</td>
                   <td style={ui.td}>{t.open ? "—" : t.featureAtExit?.toFixed(2) ?? "—"}</td>
                   <td style={{ ...ui.td, ...auditableCell }} onClick={() => setTradeAudit(t)}>
-                    {pct(t.tradeReturn)}
+                    {pct(t.tradeReturnUsd)}
+                  </td>
+                  <td style={{ ...ui.td, ...auditableCell }} onClick={() => setTradeAudit(t)}>
+                    {pct(t.tradeReturnEur)}
                   </td>
                 </tr>
               ))}
@@ -381,7 +410,7 @@ function CreditRotationResult({ result }) {
             <tbody>
               <tr>
                 <td style={{ padding: "3px 0", color: colors.textMuted, width: "45%" }}>
-                  Fecha / precio de compra ({tradeAudit.type === "HY" ? "HYG" : "LQD"}, ajustado)
+                  Fecha / precio de compra ({tradeAudit.type === "HY" ? "HYG" : "LQD"}, ajustado, USD)
                 </td>
                 <td style={{ padding: "3px 0", textAlign: "right" }}>
                   {tradeAudit.entryDate} · <strong>${Number(tradeAudit.entryPrice).toFixed(2)}</strong>
@@ -396,30 +425,38 @@ function CreditRotationResult({ result }) {
                   <strong>${Number(tradeAudit.open ? tradeAudit.asOfPrice : tradeAudit.exitPrice).toFixed(2)}</strong>
                 </td>
               </tr>
-              {tradeAudit.fxAtEntry !== undefined && (
-                <>
-                  <tr>
-                    <td style={{ padding: "3px 0", color: colors.textMuted }}>USD/EUR en la compra</td>
-                    <td style={{ padding: "3px 0", textAlign: "right" }}>{Number(tradeAudit.fxAtEntry).toFixed(4)}</td>
-                  </tr>
-                  <tr>
-                    <td style={{ padding: "3px 0", color: colors.textMuted }}>
-                      USD/EUR {tradeAudit.open ? "actual" : "en la venta"}
-                    </td>
-                    <td style={{ padding: "3px 0", textAlign: "right" }}>
-                      {Number(tradeAudit.open ? tradeAudit.fxAsOf : tradeAudit.fxAtExit).toFixed(4)}
-                    </td>
-                  </tr>
-                </>
-              )}
+              <tr>
+                <td style={{ padding: "3px 0", color: colors.textMuted }}>USD/EUR en la compra</td>
+                <td style={{ padding: "3px 0", textAlign: "right" }}>{Number(tradeAudit.fxAtEntry).toFixed(4)}</td>
+              </tr>
+              <tr>
+                <td style={{ padding: "3px 0", color: colors.textMuted }}>
+                  USD/EUR {tradeAudit.open ? "actual" : "en la venta"}
+                </td>
+                <td style={{ padding: "3px 0", textAlign: "right" }}>
+                  {Number(tradeAudit.open ? tradeAudit.fxAsOf : tradeAudit.fxAtExit).toFixed(4)}
+                </td>
+              </tr>
+              <tr>
+                <td style={{ padding: "3px 0", color: colors.textMuted, borderTop: `1px dashed ${colors.border}` }}>
+                  Retorno del tramo — USD
+                </td>
+                <td style={{ padding: "3px 0", textAlign: "right", borderTop: `1px dashed ${colors.border}` }}>
+                  <strong>{pct(tradeAudit.tradeReturnUsd, 2)}</strong>
+                </td>
+              </tr>
+              <tr>
+                <td style={{ padding: "3px 0", color: colors.textMuted }}>Retorno del tramo — EUR</td>
+                <td style={{ padding: "3px 0", textAlign: "right" }}>
+                  <strong>{pct(tradeAudit.tradeReturnEur, 2)}</strong>
+                </td>
+              </tr>
             </tbody>
           </table>
-          {tradeAudit.fxAtEntry !== undefined && (
-            <p style={{ ...ui.muted, marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${colors.border}` }}>
-              El retorno del tramo ({pct(tradeAudit.tradeReturn, 2)}) incluye el movimiento del precio en USD más el
-              movimiento real de USD/EUR en el mismo período — no hay cobertura cambiaria en esta versión.
-            </p>
-          )}
+          <p style={{ ...ui.muted, marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${colors.border}` }}>
+            El retorno en EUR incluye el movimiento del precio en USD más el movimiento real de USD/EUR en el mismo
+            período — no hay cobertura cambiaria en esta versión.
+          </p>
           <button style={{ ...ui.button("secondary"), marginTop: 10 }} onClick={() => setTradeAudit(null)}>
             Cerrar
           </button>

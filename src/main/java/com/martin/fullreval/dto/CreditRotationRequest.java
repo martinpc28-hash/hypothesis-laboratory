@@ -1,11 +1,11 @@
 package com.martin.fullreval.dto;
 
+/** No currency field: the backend always returns BOTH USD (native currency of HYG/LQD) and
+ * EUR (a real FX-exposed EUR investor's return) stats side by side — the caller never has to
+ * pick one and lose the other. */
 public class CreditRotationRequest {
     public int yearFrom;
     public int yearTo;
-    /** "USD" (native currency of HYG/LQD, no conversion) or "EUR" (a EUR-based investor's real
-     * FX-exposed return: the USD leg return plus the EUR/USD spot move over the same period). */
-    public String currency = "USD";
     /** Which macro reading drives the switch — one of CreditRotationService.FEATURES' keys
      * (CREDIT_SPREAD, VIX, YIELD_CURVE, RATE_LEVEL, RATE_CHANGE, INFLATION, GROWTH). */
     public String feature = "VIX";
