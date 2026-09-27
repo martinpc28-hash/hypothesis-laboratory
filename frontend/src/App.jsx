@@ -6,6 +6,7 @@ import PortfoliosTab from "./tabs/PortfoliosTab.jsx";
 import ScenariosTab from "./tabs/ScenariosTab.jsx";
 import SeasonalityTab from "./tabs/SeasonalityTab.jsx";
 import VixTimingTab from "./tabs/VixTimingTab.jsx";
+import CreditRotationTab from "./tabs/CreditRotationTab.jsx";
 
 const PORTFOLIOS_KEY = "fullreval.portfolios";
 const CURRENT_KEY = "fullreval.currentPortfolioId";
@@ -39,6 +40,7 @@ const TABS = [
   { key: "scenarios", label: "Escenarios de estrés", hidden: true },
   { key: "seasonality", label: "Seasonality" },
   { key: "vixTiming", label: "VIX Timing" },
+  { key: "creditRotation", label: "Credit Rotation" },
 ];
 
 export default function App() {
@@ -170,6 +172,8 @@ export default function App() {
         {activeTab === "seasonality" && <SeasonalityTab setStatus={setStatus} />}
 
         {activeTab === "vixTiming" && <VixTimingTab setStatus={setStatus} />}
+
+        {activeTab === "creditRotation" && <CreditRotationTab setStatus={setStatus} />}
       </main>
     </div>
   );

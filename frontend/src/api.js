@@ -55,4 +55,7 @@ export const api = {
 
   // VIX Timing strategy
   runVixTimingBacktest: (body) => request(`/api/vix-timing/backtest`, postJson(body)),
+  creditRotationFeatures: () => request(`/api/credit-rotation/features`),
+  runCreditRotationBacktest: (body) => request(`/api/credit-rotation/backtest`, postJson(body)),
+  runCreditRotationSweep: (body) => request(`/api/credit-rotation/sweep`, postJson(body)),
 };

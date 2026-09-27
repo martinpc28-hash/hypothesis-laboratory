@@ -51,6 +51,7 @@ public class YahooFinanceService {
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Map<String, CacheEntry> cache = new ConcurrentHashMap<>();
+    private final Map<String, CacheEntry> adjustedCache = new ConcurrentHashMap<>();
 
     public YahooFinanceService() {
         // Forced HTTP/1.1 defensively: FRED's CDN (Akamai) silently hangs Java's
@@ -77,12 +78,42 @@ public class YahooFinanceService {
 
         NavigableMap<LocalDate, BigDecimal> closes;
         try {
-            closes = fetchFromYahoo(key);
+            closes = fetchFromYahoo(key, false);
         } catch (Exception e) {
             log.warn("Could not fetch Yahoo Finance data for ticker '{}': {}", key, e.getMessage());
             closes = Collections.emptyNavigableMap();
         }
         cache.put(key, new CacheEntry(closes, Instant.now()));
+        return closes;
+    }
+
+    /**
+     * Dividend/distribution-ADJUSTED daily close history — Yahoo's "adjclose" field, which folds
+     * every historical dividend (reinvested) into the price series. Every OTHER method here uses
+     * raw "close" instead, which is a fine approximation for equities (dividends are a small
+     * fraction of total return) but is badly wrong for bond ETFs, whose return is DOMINATED by
+     * coupon distributions rather than price appreciation — e.g. HYG's raw close alone actually
+     * trends down over its history even though its real total return is strongly positive. Use
+     * this instead of fetchDailyCloses for anything where distributions matter (bond ETFs,
+     * high-dividend equities held over long horizons) rather than switching fetchDailyCloses
+     * itself, which every existing equity-momentum backtest in this project was validated
+     * against and would silently change if its return convention changed under it.
+     */
+    public NavigableMap<LocalDate, BigDecimal> fetchAdjustedDailyCloses(String ticker) {
+        String key = ticker.trim().toUpperCase();
+        CacheEntry cached = adjustedCache.get(key);
+        if (cached != null && cached.fetchedAt.plus(CACHE_TTL).isAfter(Instant.now())) {
+            return cached.closes;
+        }
+
+        NavigableMap<LocalDate, BigDecimal> closes;
+        try {
+            closes = fetchFromYahoo(key, true);
+        } catch (Exception e) {
+            log.warn("Could not fetch Yahoo Finance adjusted data for ticker '{}': {}", key, e.getMessage());
+            closes = Collections.emptyNavigableMap();
+        }
+        adjustedCache.put(key, new CacheEntry(closes, Instant.now()));
         return closes;
     }
 
@@ -102,7 +133,7 @@ public class YahooFinanceService {
         return returns;
     }
 
-    private NavigableMap<LocalDate, BigDecimal> fetchFromYahoo(String ticker) throws IOException, InterruptedException {
+    private NavigableMap<LocalDate, BigDecimal> fetchFromYahoo(String ticker, boolean adjusted) throws IOException, InterruptedException {
         // Explicit period1/period2 instead of range=max: Yahoo silently DOWNSAMPLES
         // range=max to ~monthly bars for the older portion of the series even when
         // interval=1d is requested (confirmed empirically — range=max gave ~330
@@ -136,7 +167,9 @@ public class YahooFinanceService {
         }
 
         JsonNode timestamps = result.get(0).path("timestamp");
-        JsonNode closes = result.get(0).path("indicators").path("quote").get(0).path("close");
+        JsonNode closes = adjusted
+                ? result.get(0).path("indicators").path("adjclose").get(0).path("adjclose")
+                : result.get(0).path("indicators").path("quote").get(0).path("close");
 
         TreeMap<LocalDate, BigDecimal> closesByDate = new TreeMap<>();
         for (int i = 0; i < timestamps.size(); i++) {
