@@ -7,6 +7,7 @@ import ScenariosTab from "./tabs/ScenariosTab.jsx";
 import SeasonalityTab from "./tabs/SeasonalityTab.jsx";
 import VixTimingTab from "./tabs/VixTimingTab.jsx";
 import CreditRotationTab from "./tabs/CreditRotationTab.jsx";
+import PortfolioCalculatorTab from "./tabs/PortfolioCalculatorTab.jsx";
 
 const PORTFOLIOS_KEY = "fullreval.portfolios";
 const CURRENT_KEY = "fullreval.currentPortfolioId";
@@ -41,6 +42,7 @@ const TABS = [
   { key: "seasonality", label: "Seasonality" },
   { key: "vixTiming", label: "VIX Timing" },
   { key: "creditRotation", label: "Credit Rotation" },
+  { key: "portfolioCalculator", label: "Calculadora" },
 ];
 
 export default function App() {
@@ -50,6 +52,16 @@ export default function App() {
   const [instruments, setInstruments] = useState([]);
   const [lastRunByPortfolio, setLastRunByPortfolio] = useState({});
   const [status, setStatus] = useState(null);
+
+  // Results from the other 3 strategy tabs, lifted up here so the Portfolio Calculator tab can
+  // blend them without re-fetching or duplicating each one's own configuration UI — it just reads
+  // whatever the user already ran. Seasonality reports two independent results (the main test and
+  // the separate macro-insights run), since the "with macro filter" variant only exists on the
+  // second one.
+  const [seasonalityTestResult, setSeasonalityTestResult] = useState(null);
+  const [seasonalityMacroResult, setSeasonalityMacroResult] = useState(null);
+  const [vixTimingResult, setVixTimingResult] = useState(null);
+  const [creditRotationResult, setCreditRotationResult] = useState(null);
 
   useEffect(() => {
     localStorage.setItem(PORTFOLIOS_KEY, JSON.stringify(portfolios));
@@ -169,11 +181,28 @@ export default function App() {
           <ScenariosTab portfolioId={currentPortfolioId} setStatus={setStatus} onRunComplete={onRunComplete} />
         )}
 
-        {activeTab === "seasonality" && <SeasonalityTab setStatus={setStatus} />}
+        {activeTab === "seasonality" && (
+          <SeasonalityTab
+            setStatus={setStatus}
+            onTestResult={setSeasonalityTestResult}
+            onMacroResult={setSeasonalityMacroResult}
+          />
+        )}
 
-        {activeTab === "vixTiming" && <VixTimingTab setStatus={setStatus} />}
+        {activeTab === "vixTiming" && <VixTimingTab setStatus={setStatus} onResult={setVixTimingResult} />}
 
-        {activeTab === "creditRotation" && <CreditRotationTab setStatus={setStatus} />}
+        {activeTab === "creditRotation" && (
+          <CreditRotationTab setStatus={setStatus} onResult={setCreditRotationResult} />
+        )}
+
+        {activeTab === "portfolioCalculator" && (
+          <PortfolioCalculatorTab
+            seasonalityTestResult={seasonalityTestResult}
+            seasonalityMacroResult={seasonalityMacroResult}
+            vixTimingResult={vixTimingResult}
+            creditRotationResult={creditRotationResult}
+          />
+        )}
       </main>
     </div>
   );

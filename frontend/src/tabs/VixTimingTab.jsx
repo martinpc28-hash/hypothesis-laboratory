@@ -49,7 +49,7 @@ function yearlyReturnsFromCumulative(cumulative) {
   return rows;
 }
 
-export default function VixTimingTab({ setStatus }) {
+export default function VixTimingTab({ setStatus, onResult }) {
   const [yearFrom, setYearFrom] = useState(DEFAULT_YEAR_FROM);
   const [yearTo, setYearTo] = useState(DEFAULT_YEAR_TO);
   const [currency, setCurrency] = useState("USD");
@@ -65,6 +65,7 @@ export default function VixTimingTab({ setStatus }) {
       const body = { yearFrom, yearTo, currency, hedged: currency === "EUR" && hedged, enterVix, exitVix };
       const res = await api.runVixTimingBacktest(body);
       setResult(res);
+      onResult?.(res);
     } catch (e) {
       setStatus({ type: "error", text: `VIX timing backtest failed: ${e.message}` });
     } finally {

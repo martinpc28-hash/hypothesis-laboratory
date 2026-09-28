@@ -42,7 +42,7 @@ function featureValue(v, key) {
   return v.toFixed(2);
 }
 
-export default function CreditRotationTab({ setStatus }) {
+export default function CreditRotationTab({ setStatus, onResult }) {
   const [yearFrom, setYearFrom] = useState(DEFAULT_YEAR_FROM);
   const [yearTo, setYearTo] = useState(DEFAULT_YEAR_TO);
   const [feature, setFeature] = useState("VIX");
@@ -68,6 +68,7 @@ export default function CreditRotationTab({ setStatus }) {
       };
       const res = await api.runCreditRotationBacktest(body);
       setResult(res);
+      onResult?.(res);
     } catch (e) {
       setStatus({ type: "error", text: `Credit rotation backtest failed: ${e.message}` });
     } finally {

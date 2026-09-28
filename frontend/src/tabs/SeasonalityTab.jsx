@@ -39,7 +39,7 @@ function pct(v, digits = 1) {
   return v === null || v === undefined || Number.isNaN(v) ? "—" : `${(v * 100).toFixed(digits)}%`;
 }
 
-export default function SeasonalityTab({ setStatus }) {
+export default function SeasonalityTab({ setStatus, onTestResult, onMacroResult }) {
   const [universe, setUniverse] = useState({ countries: [], sectors: [] });
   const [sources, setSources] = useState([]);
 
@@ -179,6 +179,7 @@ export default function SeasonalityTab({ setStatus }) {
         minAssetsPerYear,
       });
       setTestResult(result);
+      onTestResult?.(result);
     } catch (e) {
       setStatus({ type: "error", text: `Test failed: ${e.message}` });
     } finally {
@@ -202,6 +203,7 @@ export default function SeasonalityTab({ setStatus }) {
         minAssetsPerYear,
       });
       setMacroResult(result);
+      onMacroResult?.(result);
     } catch (e) {
       setStatus({ type: "error", text: `Macro insights failed: ${e.message}` });
     } finally {
