@@ -88,10 +88,17 @@ export default function PortfolioCalculatorTab({
         : seasonalityTestResult.strategy.cumulative;
       const key = useMacro ? "cumulativeMacroFiltered" : "cumulativeStrategy";
       const tickers = seasonalityTestResult?.meta?.tickers?.join("+") || "Seasonality";
+      // The macro/top-quartile variant's OWN tab already computed real daily-return-based
+      // cagr/volatility/maxDrawdown/totalReturn — reused as-is below when this leg isn't clipped
+      // to a narrower common window, instead of re-deriving a noisier approximation from just its
+      // yearly returns (same number the annual approximation would converge to for CAGR/totalReturn
+      // anyway, but volatility/maxDrawdown are genuinely more accurate here).
+      const realStats = useMacro ? seasonalityMacroResult.macroFilteredStrategy.stats : seasonalityTestResult.strategy.stats.strategy;
       legs.push({
         name: `Seasonality ${tickers} (${useMacro ? "con filtro macro" : "top quartile"})`,
         weight: Number(seasonalityWeight) || 0,
         returns: yearlyReturnMap(cumulative, key),
+        realStats,
       });
     }
     if (vixIncluded && vixAvailable) {
@@ -99,6 +106,7 @@ export default function PortfolioCalculatorTab({
         name: "VIX Timing",
         weight: Number(vixWeight) || 0,
         returns: yearlyReturnMap(vixTimingResult.cumulative, "cumulativeStrategy"),
+        realStats: vixTimingResult.stats?.strategy,
       });
     }
     if (creditIncluded && creditAvailable) {
@@ -107,6 +115,7 @@ export default function PortfolioCalculatorTab({
         name: `Credit Rotation (${creditCurrency})`,
         weight: Number(creditWeight) || 0,
         returns: yearlyReturnMap(creditRotationResult.cumulative, key),
+        realStats: creditRotationResult.stats?.[creditCurrency.toLowerCase()]?.strategy,
       });
     }
     return legs;
@@ -167,7 +176,19 @@ export default function PortfolioCalculatorTab({
     const portfolioStats = statsFromYearlyReturns(blendedReturns);
     const legStats = normalized.map((l) => {
       const legReturns = sortedYears.map((y) => l.returns.get(y) ?? 0);
-      return { name: l.name, weight: l.normWeight, stats: statsFromYearlyReturns(legReturns) };
+      // Only trust the leg's own real (daily-based) stats when the combined window doesn't clip
+      // it down further than what it was originally computed over — a real stat for a DIFFERENT
+      // (wider) period than what's actually being blended here would be misleading.
+      const legYears = [...l.returns.keys()];
+      const notClipped =
+        l.realStats && legYears.length === sortedYears.length && Math.min(...legYears) === sortedYears[0] &&
+        Math.max(...legYears) === sortedYears[sortedYears.length - 1];
+      return {
+        name: l.name,
+        weight: l.normWeight,
+        stats: notClipped ? l.realStats : statsFromYearlyReturns(legReturns),
+        isReal: !!notClipped,
+      };
     });
 
     setCalc({ years: sortedYears, points, portfolioStats, legStats, legNames: normalized.map((l) => l.name) });
@@ -365,7 +386,17 @@ export default function PortfolioCalculatorTab({
                   </tr>
                   {calc.legStats.map((l, i) => (
                     <tr key={i}>
-                      <td style={ui.td}>{l.name}</td>
+                      <td style={ui.td}>
+                        {l.name}
+                        {l.isReal && (
+                          <span
+                            title="Volatilidad y drawdown reales (diarios), calculados por su propia pestaña — no una aproximación anual."
+                            style={{ marginLeft: 6, color: colors.success, cursor: "help" }}
+                          >
+                            ✓
+                          </span>
+                        )}
+                      </td>
                       <td style={ui.td}>{pct(l.weight, 0)}</td>
                       <td style={{ ...ui.td, color: l.stats.totalReturn >= 0 ? colors.success : colors.danger }}>
                         {pct(l.stats.totalReturn)}
@@ -379,9 +410,13 @@ export default function PortfolioCalculatorTab({
               </table>
             </div>
             <p style={{ ...ui.muted, marginTop: 8 }}>
-              Las filas de cada estrategia individual están recortadas al mismo período {calc.years[0]}–
-              {calc.years[calc.years.length - 1]} que la cartera combinada, para que sean comparables — no son
-              necesariamente el resultado completo que viste en su propia pestaña.
+              Las filas con <span style={{ color: colors.success }}>✓</span> muestran la volatilidad y el máximo
+              drawdown REALES (calculados sobre retornos diarios por esa misma pestaña), no una aproximación — pasa
+              cuando el período que estás combinando cubre exactamente todo lo que esa estrategia corrió. Las demás
+              filas (y siempre la fila "Cartera combinada", porque mezclar 3 calendarios diarios distintos no es
+              posible) están recortadas al período {calc.years[0]}–{calc.years[calc.years.length - 1]} y aproximadas
+              a partir de sus retornos ANUALES — no son necesariamente el resultado completo que viste en su propia
+              pestaña.
             </p>
           </div>
         </>
