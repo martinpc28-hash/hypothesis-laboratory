@@ -255,6 +255,34 @@ export default function CreditRotationTab({ setStatus, onResult }) {
   );
 }
 
+// Backend only exposes YEAR-END CUMULATIVE curves (same shape the chart uses) — this derives each
+// year's own isolated return from two consecutive cumulative points, same technique used in
+// VixTimingTab's own per-year table, so "año a año" numbers don't need a new backend endpoint.
+function yearlyReturnsFromCumulative(cumulative) {
+  const prev = { strategyUsd: 0, strategyEur: 0, hyUsd: 0, igUsd: 0, sp500Usd: 0, sp500Eur: 0 };
+  const step = (row, curKey, prevField) =>
+    row[curKey] === undefined || row[curKey] === null ? null : (1 + row[curKey]) / (1 + prev[prevField]) - 1;
+  const rows = [];
+  for (const c of cumulative) {
+    rows.push({
+      year: c.year,
+      strategyUsd: step(c, "cumulativeStrategyUsd", "strategyUsd"),
+      strategyEur: step(c, "cumulativeStrategyEur", "strategyEur"),
+      hyUsd: step(c, "cumulativeHyUsd", "hyUsd"),
+      igUsd: step(c, "cumulativeIgUsd", "igUsd"),
+      sp500Usd: step(c, "cumulativeSp500Usd", "sp500Usd"),
+      sp500Eur: step(c, "cumulativeSp500Eur", "sp500Eur"),
+    });
+    prev.strategyUsd = c.cumulativeStrategyUsd ?? prev.strategyUsd;
+    prev.strategyEur = c.cumulativeStrategyEur ?? prev.strategyEur;
+    prev.hyUsd = c.cumulativeHyUsd ?? prev.hyUsd;
+    prev.igUsd = c.cumulativeIgUsd ?? prev.igUsd;
+    prev.sp500Usd = c.cumulativeSp500Usd ?? prev.sp500Usd;
+    prev.sp500Eur = c.cumulativeSp500Eur ?? prev.sp500Eur;
+  }
+  return rows;
+}
+
 function StatsRow({ label, usd, eur }) {
   return (
     <tr>
@@ -363,6 +391,45 @@ function CreditRotationResult({ result }) {
       <div style={ui.card}>
         <h3 style={ui.cardTitle}>Rentabilidad acumulada</h3>
         <LineChart points={cumulative} series={series} xKey="year" />
+      </div>
+
+      <div style={ui.card}>
+        <h3 style={ui.cardTitle}>Rentabilidad año a año</h3>
+        <p style={ui.cardSubtitle}>
+          Retorno aislado de cada año calendario (no acumulado) — derivado de la misma curva del gráfico de arriba.
+          {meta.hyTicker}/{meta.igTicker} "buy & hold" muestran qué hubiera rendido quedarse 100% en uno de los dos
+          fondos todo el año, para comparar contra lo que la rotación realmente hizo.
+        </p>
+        <div style={ui.tableScroll}>
+          <table style={ui.table}>
+            <thead>
+              <tr>
+                <th style={ui.th}>Año</th>
+                <th style={ui.th}>Rotación (USD)</th>
+                <th style={ui.th}>Rotación (EUR)</th>
+                <th style={ui.th}>{meta.hyTicker} buy&amp;hold (USD)</th>
+                <th style={ui.th}>{meta.igTicker} buy&amp;hold (USD)</th>
+                {spyAvailable && <th style={ui.th}>S&amp;P 500 (USD, referencia)</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {yearlyReturnsFromCumulative(cumulative).map((r) => (
+                <tr key={r.year}>
+                  <td style={ui.td}>{r.year}</td>
+                  <td style={{ ...ui.td, color: r.strategyUsd >= 0 ? colors.success : colors.danger, fontWeight: 700 }}>
+                    {pct(r.strategyUsd)}
+                  </td>
+                  <td style={{ ...ui.td, color: r.strategyEur >= 0 ? colors.success : colors.danger, fontWeight: 700 }}>
+                    {pct(r.strategyEur)}
+                  </td>
+                  <td style={ui.td}>{pct(r.hyUsd)}</td>
+                  <td style={ui.td}>{pct(r.igUsd)}</td>
+                  {spyAvailable && <td style={ui.td}>{pct(r.sp500Usd)}</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div style={ui.card}>

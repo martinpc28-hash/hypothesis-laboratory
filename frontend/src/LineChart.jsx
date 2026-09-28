@@ -6,7 +6,10 @@ import { colors } from "./theme.js";
 // Clicking a point pins a small readout with every series' value for that
 // x (year) — the native <title> hover tooltip alone doesn't work on touch
 // and disappears the moment you move the mouse, so a click-to-pin readout
-// lets you actually read the numbers.
+// lets you actually read the numbers. Clicking a LEGEND entry instead toggles
+// that series off the chart (line, points, y-axis scale all recompute without
+// it) — lets you isolate one or two curves out of a crowded chart without
+// re-running anything; click it again to bring it back.
 export default function LineChart({ points, series, xKey = "year" }) {
   const width = 640;
   const height = 240;
@@ -15,13 +18,25 @@ export default function LineChart({ points, series, xKey = "year" }) {
   const plotHeight = height - padding.top - padding.bottom;
 
   const [activeIndex, setActiveIndex] = useState(null);
+  const [hiddenKeys, setHiddenKeys] = useState(() => new Set());
 
   if (!points || points.length === 0) {
     return <div style={{ color: colors.textMuted, fontSize: 13 }}>Sin datos suficientes.</div>;
   }
 
+  function toggleSeries(key) {
+    setHiddenKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  const visibleSeries = series.filter((s) => !hiddenKeys.has(s.key));
+
   const xs = points.map((p) => p[xKey]);
-  const allYs = points.flatMap((p) => series.map((s) => p[s.key]).filter((v) => v !== null && v !== undefined));
+  const allYs = points.flatMap((p) => visibleSeries.map((s) => p[s.key]).filter((v) => v !== null && v !== undefined));
   const xMin = Math.min(...xs);
   const xMax = Math.max(...xs);
   const yMin = Math.min(...allYs, 0);
@@ -49,7 +64,7 @@ export default function LineChart({ points, series, xKey = "year" }) {
         stroke={colors.text}
       />
 
-      {series.map((s) => {
+      {visibleSeries.map((s) => {
         const path = points
           .filter((p) => p[s.key] !== null && p[s.key] !== undefined)
           .map((p, i) => `${i === 0 ? "M" : "L"} ${sx(p[xKey])} ${sy(p[s.key])}`)
@@ -92,21 +107,35 @@ export default function LineChart({ points, series, xKey = "year" }) {
         {(yMin * 100).toFixed(0)}%
       </text>
 
-      {/* Legend */}
-      {series.map((s, i) => (
-        <g key={s.key} transform={`translate(${padding.left + i * 150}, ${padding.top - 4})`}>
-          <rect width={10} height={10} fill={s.color} />
-          <text x={14} y={9} fontSize="11" fill={colors.text}>
-            {s.label}
-          </text>
-        </g>
-      ))}
+      {/* Legend — click a series to hide/show it on the chart */}
+      {series.map((s, i) => {
+        const isHidden = hiddenKeys.has(s.key);
+        return (
+          <g
+            key={s.key}
+            transform={`translate(${padding.left + i * 150}, ${padding.top - 4})`}
+            style={{ cursor: "pointer" }}
+            onClick={() => toggleSeries(s.key)}
+          >
+            <rect width={10} height={10} fill={isHidden ? colors.border : s.color} />
+            <text
+              x={14}
+              y={9}
+              fontSize="11"
+              fill={isHidden ? colors.textMuted : colors.text}
+              textDecoration={isHidden ? "line-through" : "none"}
+            >
+              {s.label}
+            </text>
+          </g>
+        );
+      })}
 
       {activePoint && (
         <PointReadout
           x={sx(activePoint[xKey])}
           label={activePoint[xKey]}
-          rows={series
+          rows={visibleSeries
             .filter((s) => activePoint[s.key] !== null && activePoint[s.key] !== undefined)
             .map((s) => ({ label: s.label, color: s.color, value: activePoint[s.key] }))}
           width={width}
