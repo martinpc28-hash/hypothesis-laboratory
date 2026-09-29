@@ -283,6 +283,35 @@ function yearlyReturnsFromCumulative(cumulative) {
   return rows;
 }
 
+// Boundary-price audit for a "buy & hold" year cell (HY/IG/S&P 500) — walks back to the PREVIOUS
+// year's own boundary price (or `firstPrices`, for the first year in range) as the entry, and this
+// year's boundary price as the exit, using the exact prices the backend captured on those exact
+// trading days (see CreditRotationService.simulate's yearPoint.put("hyPriceUsd", ...) etc.).
+function priceAuditFor(cumulative, firstPrices, year, priceKey, dateKey) {
+  const idx = cumulative.findIndex((c) => c.year === year);
+  if (idx === -1) return null;
+  const cur = cumulative[idx];
+  const prev = idx > 0 ? cumulative[idx - 1] : null;
+  const entryPrice = prev ? prev[priceKey] : firstPrices?.[priceKey];
+  const entryDate = prev ? (dateKey ? prev[dateKey] : prev.boundaryDate) : dateKey ? firstPrices?.[dateKey] : firstPrices?.date;
+  const exitPrice = cur[priceKey];
+  const exitDate = dateKey ? cur[dateKey] : cur.boundaryDate;
+  if (entryPrice === undefined || entryPrice === null || exitPrice === undefined || exitPrice === null) return null;
+  return { entryDate, entryPrice, exitDate, exitPrice, tradeReturn: (exitPrice - entryPrice) / entryPrice };
+}
+
+// Every trade (segment) whose date range overlaps the given calendar year — the "Rotación" per-year
+// return can be made up of several trades (if the strategy switched HY/IG mid-year) or a slice of
+// one long trade, so its audit is "which real trades were active", each one already fully priced.
+function tradesForYear(trades, year) {
+  const yStart = `${year}-01-01`;
+  const yEnd = `${year}-12-31`;
+  return trades.filter((t) => {
+    const end = t.open ? t.asOfDate : t.exitDate;
+    return t.entryDate <= yEnd && end >= yStart;
+  });
+}
+
 function StatsRow({ label, usd, eur }) {
   return (
     <tr>
@@ -304,8 +333,10 @@ function StatsRow({ label, usd, eur }) {
 }
 
 function CreditRotationResult({ result }) {
-  const { meta, stats, cumulative, spyAvailable, trades, tradesCount, daysInHy, daysInIg, pctTimeInHy } = result;
+  const { meta, stats, cumulative, firstPrices, spyAvailable, trades, tradesCount, daysInHy, daysInIg, pctTimeInHy } = result;
   const [tradeAudit, setTradeAudit] = useState(null);
+  const [priceAudit, setPriceAudit] = useState(null);
+  const [yearTrades, setYearTrades] = useState(null);
 
   const series = [
     { key: "cumulativeStrategyUsd", label: "Rotación (USD)", color: colors.success },
@@ -398,7 +429,9 @@ function CreditRotationResult({ result }) {
         <p style={ui.cardSubtitle}>
           Retorno aislado de cada año calendario (no acumulado) — derivado de la misma curva del gráfico de arriba.
           {meta.hyTicker}/{meta.igTicker} "buy & hold" muestran qué hubiera rendido quedarse 100% en uno de los dos
-          fondos todo el año, para comparar contra lo que la rotación realmente hizo.
+          fondos todo el año, para comparar contra lo que la rotación realmente hizo. Cualquier número es
+          clickeable para auditarlo: Rotación muestra qué operaciones estuvieron activas ese año, y los buy&amp;hold
+          muestran las fechas y precios exactos usados.
         </p>
         <div style={ui.tableScroll}>
           <table style={ui.table}>
@@ -416,15 +449,53 @@ function CreditRotationResult({ result }) {
               {yearlyReturnsFromCumulative(cumulative).map((r) => (
                 <tr key={r.year}>
                   <td style={ui.td}>{r.year}</td>
-                  <td style={{ ...ui.td, color: r.strategyUsd >= 0 ? colors.success : colors.danger, fontWeight: 700 }}>
+                  <td
+                    style={{ ...ui.td, ...auditableCell, color: r.strategyUsd >= 0 ? colors.success : colors.danger, fontWeight: 700 }}
+                    onClick={() => setYearTrades({ year: r.year, trades: tradesForYear(trades, r.year) })}
+                  >
                     {pct(r.strategyUsd)}
                   </td>
-                  <td style={{ ...ui.td, color: r.strategyEur >= 0 ? colors.success : colors.danger, fontWeight: 700 }}>
+                  <td
+                    style={{ ...ui.td, ...auditableCell, color: r.strategyEur >= 0 ? colors.success : colors.danger, fontWeight: 700 }}
+                    onClick={() => setYearTrades({ year: r.year, trades: tradesForYear(trades, r.year) })}
+                  >
                     {pct(r.strategyEur)}
                   </td>
-                  <td style={ui.td}>{pct(r.hyUsd)}</td>
-                  <td style={ui.td}>{pct(r.igUsd)}</td>
-                  {spyAvailable && <td style={ui.td}>{pct(r.sp500Usd)}</td>}
+                  <td
+                    style={{ ...ui.td, ...auditableCell }}
+                    onClick={() =>
+                      setPriceAudit({
+                        label: `${meta.hyTicker} buy & hold — USD`,
+                        ...priceAuditFor(cumulative, firstPrices, r.year, "hyPriceUsd"),
+                      })
+                    }
+                  >
+                    {pct(r.hyUsd)}
+                  </td>
+                  <td
+                    style={{ ...ui.td, ...auditableCell }}
+                    onClick={() =>
+                      setPriceAudit({
+                        label: `${meta.igTicker} buy & hold — USD`,
+                        ...priceAuditFor(cumulative, firstPrices, r.year, "igPriceUsd"),
+                      })
+                    }
+                  >
+                    {pct(r.igUsd)}
+                  </td>
+                  {spyAvailable && (
+                    <td
+                      style={{ ...ui.td, ...auditableCell }}
+                      onClick={() =>
+                        setPriceAudit({
+                          label: "S&P 500 (SPY) — USD, referencia",
+                          ...priceAuditFor(cumulative, firstPrices, r.year, "spPriceUsd"),
+                        })
+                      }
+                    >
+                      {pct(r.sp500Usd)}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -534,6 +605,100 @@ function CreditRotationResult({ result }) {
             de por medio, es simplemente cuánto rindió ese fondo en su propia divisa durante este tramo.
           </p>
           <button style={{ ...ui.button("secondary"), marginTop: 10 }} onClick={() => setTradeAudit(null)}>
+            Cerrar
+          </button>
+        </div>
+      )}
+
+      {priceAudit && (
+        <div style={ui.card}>
+          <h3 style={ui.cardTitle}>Auditoría — {priceAudit.label}</h3>
+          {priceAudit.entryPrice === undefined ? (
+            <p style={ui.muted}>No hay precio suficiente para auditar este año.</p>
+          ) : (
+            <table style={{ width: "100%", fontSize: 12.5, borderCollapse: "collapse" }}>
+              <tbody>
+                <tr>
+                  <td style={{ padding: "3px 0", color: colors.textMuted, width: "45%" }}>Fecha / precio inicial</td>
+                  <td style={{ padding: "3px 0", textAlign: "right" }}>
+                    {priceAudit.entryDate} · <strong>${Number(priceAudit.entryPrice).toFixed(2)}</strong>
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ padding: "3px 0", color: colors.textMuted }}>Fecha / precio final</td>
+                  <td style={{ padding: "3px 0", textAlign: "right" }}>
+                    {priceAudit.exitDate} · <strong>${Number(priceAudit.exitPrice).toFixed(2)}</strong>
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ padding: "3px 0", color: colors.textMuted, borderTop: `1px dashed ${colors.border}` }}>
+                    Retorno del año
+                  </td>
+                  <td style={{ padding: "3px 0", textAlign: "right", borderTop: `1px dashed ${colors.border}` }}>
+                    <strong>{pct(priceAudit.tradeReturn, 2)}</strong>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+          <p style={{ ...ui.muted, marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${colors.border}` }}>
+            Precio inicial = último precio publicado al cierre del año anterior (o el primer día de la serie, si es
+            el primer año del rango). Precio final = último precio publicado ese año — los mismos que arma la curva
+            acumulada del gráfico de arriba.
+          </p>
+          <button style={{ ...ui.button("secondary"), marginTop: 10 }} onClick={() => setPriceAudit(null)}>
+            Cerrar
+          </button>
+        </div>
+      )}
+
+      {yearTrades && (
+        <div style={ui.card}>
+          <h3 style={ui.cardTitle}>Auditoría — Rotación {yearTrades.year}</h3>
+          {yearTrades.trades.length === 0 ? (
+            <p style={ui.muted}>No hay operaciones registradas para este año.</p>
+          ) : (
+            <>
+              <p style={ui.cardSubtitle}>
+                Operaciones activas durante {yearTrades.year} (pueden empezar antes o seguir después de este año —
+                el retorno mostrado es el del tramo COMPLETO, no solo la parte dentro de {yearTrades.year}). Click en
+                "Detalle" para ver los precios exactos de esa operación.
+              </p>
+              <div style={ui.tableScroll}>
+                <table style={ui.table}>
+                  <thead>
+                    <tr>
+                      <th style={ui.th}>Tipo</th>
+                      <th style={ui.th}>Entrada</th>
+                      <th style={ui.th}>Salida</th>
+                      <th style={ui.th}>Retorno (USD)</th>
+                      <th style={ui.th}>Retorno (EUR)</th>
+                      <th style={ui.th}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {yearTrades.trades.map((t, i) => (
+                      <tr key={i}>
+                        <td style={ui.td}>
+                          <span style={ui.badge(t.type === "HY" ? "primary" : "neutral")}>{t.type}</span>
+                        </td>
+                        <td style={ui.td}>{t.entryDate}</td>
+                        <td style={ui.td}>{t.open ? "Abierta (sigue hoy)" : t.exitDate}</td>
+                        <td style={ui.td}>{pct(t.tradeReturnUsd)}</td>
+                        <td style={ui.td}>{pct(t.tradeReturnEur)}</td>
+                        <td style={ui.td}>
+                          <button style={ui.button("secondary")} onClick={() => setTradeAudit(t)}>
+                            Detalle
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+          <button style={{ ...ui.button("secondary"), marginTop: 10 }} onClick={() => setYearTrades(null)}>
             Cerrar
           </button>
         </div>

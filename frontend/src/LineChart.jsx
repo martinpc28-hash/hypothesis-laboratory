@@ -35,7 +35,11 @@ export default function LineChart({ points, series, xKey = "year" }) {
 
   const visibleSeries = series.filter((s) => !hiddenKeys.has(s.key));
 
-  const xs = points.map((p) => p[xKey]);
+  // xKey can be a plain year number (every other chart in this app) or an ISO date string (the
+  // Portfolio Calculator's weekly-resolution charts) — converted to a timestamp for the actual
+  // scale math, but the raw value is still what gets shown as the axis/tooltip label.
+  const toNum = (v) => (typeof v === "string" ? new Date(v).getTime() : v);
+  const xs = points.map((p) => toNum(p[xKey]));
   const allYs = points.flatMap((p) => visibleSeries.map((s) => p[s.key]).filter((v) => v !== null && v !== undefined));
   const xMin = Math.min(...xs);
   const xMax = Math.max(...xs);
@@ -44,7 +48,7 @@ export default function LineChart({ points, series, xKey = "year" }) {
   const xRange = xMax - xMin || 1;
   const yRange = yMax - yMin || 1;
 
-  const sx = (v) => padding.left + ((v - xMin) / xRange) * plotWidth;
+  const sx = (v) => padding.left + ((toNum(v) - xMin) / xRange) * plotWidth;
   const sy = (v) => padding.top + plotHeight - ((v - yMin) / yRange) * plotHeight;
   const zeroY = yMin <= 0 && yMax >= 0 ? sy(0) : null;
 

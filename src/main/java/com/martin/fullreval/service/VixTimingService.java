@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.MathContext;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -114,6 +115,10 @@ public class VixTimingService {
         int daysInEquity = 0, daysInCash = 0;
 
         Map<Integer, Map<String, Object>> cumulativeByYear = new LinkedHashMap<>();
+        // Weekly (Friday close, or the last trading day of a short week) wealth snapshots — same
+        // fields as `cumulative`'s yearly points, just far more of them, so the frontend can plot
+        // real week-to-week movement instead of a nearly straight line between year-end dots.
+        List<Map<String, Object>> weekly = new ArrayList<>();
         List<Map<String, Object>> trades = new ArrayList<>();
 
         // Unlike the equity-only version, every day belongs to SOME position (equity or cash), so
@@ -158,6 +163,15 @@ public class VixTimingService {
             yearPoint.put("cumulativeSp500", sp500Wealth - 1.0);
             if (includeMsciWorld) yearPoint.put("cumulativeMsciWorld", msciWealth - 1.0);
 
+            if (day.getDayOfWeek() == DayOfWeek.FRIDAY || i == tradingDays.size() - 1) {
+                Map<String, Object> weekPoint = new LinkedHashMap<>();
+                weekPoint.put("date", day.toString());
+                weekPoint.put("cumulativeStrategy", strategyWealth - 1.0);
+                weekPoint.put("cumulativeSp500", sp500Wealth - 1.0);
+                if (includeMsciWorld) weekPoint.put("cumulativeMsciWorld", msciWealth - 1.0);
+                weekly.add(weekPoint);
+            }
+
             // Position for the NEXT day is decided from TODAY's now-known close.
             Double vixToday = floorValue(vix, day);
             if (vixToday != null && ((!inEquity && vixToday >= enterVix) || (inEquity && vixToday <= exitVix))) {
@@ -188,6 +202,7 @@ public class VixTimingService {
         result.put("meta", meta);
 
         result.put("cumulative", cumulativeByYear.values().stream().toList());
+        result.put("weekly", weekly);
         result.put("msciWorldAvailable", includeMsciWorld);
 
         Map<String, Object> stats = new LinkedHashMap<>();

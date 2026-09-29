@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.MathContext;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -304,6 +305,12 @@ public class CreditRotationService {
         boolean includeSpy = !spy.isEmpty() && !spy.firstKey().isAfter(tradingDays.get(0));
 
         Map<Integer, Map<String, Object>> cumulativeByYear = new LinkedHashMap<>();
+        // Weekly (Friday close, or whatever the last trading day of a short week is) wealth
+        // snapshots — same fields as the yearly `cumulative` points, just far more of them, so the
+        // frontend can plot the real week-to-week movement instead of a nearly straight line
+        // between year-end dots. Coarser than a full daily curve on purpose: enough resolution to
+        // see the shape of a drawdown or a rally without shipping ~6,500 points to the browser.
+        List<Map<String, Object>> weekly = new ArrayList<>();
         List<Map<String, Object>> trades = new ArrayList<>();
         Map<String, Object> segment = openSegment(inHY, tradingDays.get(0), f0, inst);
         double segmentMultiplierUsd = 1.0, segmentMultiplierEur = 1.0;
@@ -347,6 +354,47 @@ public class CreditRotationService {
                 yearPoint.put("cumulativeSp500Eur", spyLedger.wealthEur - 1.0);
             }
 
+            // Year-END boundary prices (overwritten every day, so by the time the loop moves to
+            // the next year this holds the LAST trading day's values) — lets the frontend audit
+            // the HY/IG/SPY "buy & hold" per-year returns down to the exact prices used, the same
+            // way each trade in `trades` is already auditable. USD uses the exact daily calendar
+            // (hyUsd/igUsd/spy all share tradingDays' own calendar); EUR uses floorEntry since the
+            // EUR funds publish on their own calendar, same convention as eurFundReturn above.
+            yearPoint.put("boundaryDate", day.toString());
+            BigDecimal hyUsdPrice = hyUsd.get(day);
+            if (hyUsdPrice != null) yearPoint.put("hyPriceUsd", hyUsdPrice.doubleValue());
+            BigDecimal igUsdPrice = igUsd.get(day);
+            if (igUsdPrice != null) yearPoint.put("igPriceUsd", igUsdPrice.doubleValue());
+            Map.Entry<LocalDate, BigDecimal> hyEurEntry = hyEur.floorEntry(day);
+            if (hyEurEntry != null) {
+                yearPoint.put("hyPriceEur", hyEurEntry.getValue().doubleValue());
+                yearPoint.put("hyPriceEurDate", hyEurEntry.getKey().toString());
+            }
+            Map.Entry<LocalDate, BigDecimal> igEurEntry = igEur.floorEntry(day);
+            if (igEurEntry != null) {
+                yearPoint.put("igPriceEur", igEurEntry.getValue().doubleValue());
+                yearPoint.put("igPriceEurDate", igEurEntry.getKey().toString());
+            }
+            if (includeSpy) {
+                BigDecimal spyPrice = spy.get(day);
+                if (spyPrice != null) yearPoint.put("spPriceUsd", spyPrice.doubleValue());
+            }
+
+            boolean isLastDay = i == tradingDays.size() - 1;
+            if (day.getDayOfWeek() == DayOfWeek.FRIDAY || isLastDay) {
+                Map<String, Object> weekPoint = new LinkedHashMap<>();
+                weekPoint.put("date", day.toString());
+                weekPoint.put("cumulativeStrategyUsd", strategy.wealthUsd - 1.0);
+                weekPoint.put("cumulativeStrategyEur", strategy.wealthEur - 1.0);
+                weekPoint.put("cumulativeHyUsd", hyLedger.wealthUsd - 1.0);
+                weekPoint.put("cumulativeIgUsd", igLedger.wealthUsd - 1.0);
+                if (includeSpy) {
+                    weekPoint.put("cumulativeSp500Usd", spyLedger.wealthUsd - 1.0);
+                    weekPoint.put("cumulativeSp500Eur", spyLedger.wealthEur - 1.0);
+                }
+                weekly.add(weekPoint);
+            }
+
             Double fToday = floorValue(feature, day);
             if (fToday != null && ((!inHY && fToday >= enterThreshold) || (inHY && fToday <= exitThreshold))) {
                 inHY = !inHY;
@@ -363,8 +411,35 @@ public class CreditRotationService {
 
         double yearsElapsed = ChronoUnit.DAYS.between(tradingDays.get(0), tradingDays.get(tradingDays.size() - 1)) / 365.25;
 
+        // The price audit above needs an "entry" boundary for the FIRST year in range too — the
+        // day right before the loop starts accruing returns (tradingDays.get(0) itself, since the
+        // loop's first iteration computes day 1's return relative to it).
+        LocalDate firstDay = tradingDays.get(0);
+        Map<String, Object> firstPrices = new LinkedHashMap<>();
+        firstPrices.put("date", firstDay.toString());
+        BigDecimal hyUsd0 = hyUsd.get(firstDay);
+        if (hyUsd0 != null) firstPrices.put("hyPriceUsd", hyUsd0.doubleValue());
+        BigDecimal igUsd0 = igUsd.get(firstDay);
+        if (igUsd0 != null) firstPrices.put("igPriceUsd", igUsd0.doubleValue());
+        Map.Entry<LocalDate, BigDecimal> hyEur0 = hyEur.floorEntry(firstDay);
+        if (hyEur0 != null) {
+            firstPrices.put("hyPriceEur", hyEur0.getValue().doubleValue());
+            firstPrices.put("hyPriceEurDate", hyEur0.getKey().toString());
+        }
+        Map.Entry<LocalDate, BigDecimal> igEur0 = igEur.floorEntry(firstDay);
+        if (igEur0 != null) {
+            firstPrices.put("igPriceEur", igEur0.getValue().doubleValue());
+            firstPrices.put("igPriceEurDate", igEur0.getKey().toString());
+        }
+        if (includeSpy) {
+            BigDecimal spy0 = spy.get(firstDay);
+            if (spy0 != null) firstPrices.put("spPriceUsd", spy0.doubleValue());
+        }
+
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("cumulative", cumulativeByYear.values().stream().toList());
+        result.put("weekly", weekly);
+        result.put("firstPrices", firstPrices);
         result.put("spyAvailable", includeSpy);
 
         Map<String, Object> statsUsd = new LinkedHashMap<>();

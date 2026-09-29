@@ -446,6 +446,9 @@ public class SeasonalityService {
         result.put("disagreementCount", disagreements);
         result.put("perYear", perYear);
         result.put("cumulative", cumulative);
+        result.put("weekly", daily.weekly().stream()
+                .map(p -> Map.of("date", p.get("date"), "cumulativeMacroFiltered", p.get("cumulative")))
+                .toList());
         result.put("stats", stats);
         return result;
     }
@@ -1034,7 +1037,7 @@ public class SeasonalityService {
             }
             maxDrawdownByYear.put(year, maxDrawdown);
         }
-        return new DailySeries(annualizedVolFromDaily(allDailyReturns), maxDrawdown, maxDrawdownByYear);
+        return new DailySeries(annualizedVolFromDaily(allDailyReturns), maxDrawdown, maxDrawdownByYear, List.of());
     }
 
     /** Just the rest-of-year ReturnCalc's value — skips computing the signal-window and
@@ -1663,6 +1666,22 @@ public class SeasonalityService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("perYear", perYear);
         result.put("cumulative", cumulative);
+        // Weekly wealth curves (one array per series, each on its OWN trading calendar — the
+        // frontend resamples independently instead of requiring them to share exact dates) — lets
+        // the Portfolio Calculator plot real week-to-week movement instead of only year-end dots.
+        result.put("weekly", strategyDaily.weekly().stream()
+                .map(p -> Map.of("date", p.get("date"), "cumulativeStrategy", p.get("cumulative")))
+                .toList());
+        if (includeSp500) {
+            result.put("weeklySp500", sp500Daily.weekly().stream()
+                    .map(p -> Map.of("date", p.get("date"), "cumulativeSp500", p.get("cumulative")))
+                    .toList());
+        }
+        if (includeMsciWorld) {
+            result.put("weeklyMsciWorld", msciDaily.weekly().stream()
+                    .map(p -> Map.of("date", p.get("date"), "cumulativeMsciWorld", p.get("cumulative")))
+                    .toList());
+        }
         result.put("sp500Available", includeSp500);
         result.put("msciWorldAvailable", includeMsciWorld);
         result.put("stats", stats);
@@ -1673,7 +1692,7 @@ public class SeasonalityService {
      * peak-to-trough over the SAME continuous daily wealth curve (built once, used for both —
      * see buildDailySeries). maxDrawdownByYear: that curve's running drawdown as of each
      * year-end, i.e. what the per-year table columns show. */
-    private record DailySeries(double volatility, double maxDrawdown, Map<Integer, Double> maxDrawdownByYear) {}
+    private record DailySeries(double volatility, double maxDrawdown, Map<Integer, Double> maxDrawdownByYear, List<Map<String, Object>> weekly) {}
 
     /**
      * Builds ONE continuous, chronologically-ordered daily wealth curve for a series (top
@@ -1692,6 +1711,13 @@ public class SeasonalityService {
                                           Map<String, NavigableMap<LocalDate, BigDecimal>> closesByTicker,
                                           int startMonth, int lengthMonths) {
         List<Double> allDailyReturns = new ArrayList<>();
+        // Weekly (Friday, or the last trading day of a holding period) wealth snapshots — same
+        // idea as CreditRotationService/VixTimingService's own `weekly` arrays, built here since
+        // this is the one place in Seasonality that already walks a real day-by-day wealth curve
+        // (the yearly `cumulative` array elsewhere only has year-end points). Between one year's
+        // holding period and the next, wealth is flat (see this method's own doc comment above),
+        // so no weekly points are emitted for the signal window itself — nothing moved there.
+        List<Map<String, Object>> weekly = new ArrayList<>();
         double wealth = 1.0;
         double peak = 1.0;
         double maxDrawdown = 0.0;
@@ -1705,30 +1731,39 @@ public class SeasonalityService {
             LocalDate holdEnd = LocalDate.of(year, 12, 31);
 
             if (basket != null && !basket.isEmpty() && holdStart.isBefore(holdEnd)) {
-                List<Double> dailyReturns = portfolioDailyReturns(basket, closesByTicker, holdStart, holdEnd);
+                List<LocalDate> dates = referenceDates(basket, closesByTicker, holdStart, holdEnd);
+                List<Double> dailyReturns = portfolioDailyReturns(basket, closesByTicker, dates);
                 allDailyReturns.addAll(dailyReturns);
-                for (double r : dailyReturns) {
-                    wealth *= 1.0 + r;
+                for (int i = 0; i < dailyReturns.size(); i++) {
+                    wealth *= 1.0 + dailyReturns.get(i);
                     peak = Math.max(peak, wealth);
                     maxDrawdown = Math.min(maxDrawdown, (wealth - peak) / peak);
+                    LocalDate day = dates.get(i + 1); // dates[0] is the return's baseline day
+                    if (day.getDayOfWeek() == java.time.DayOfWeek.FRIDAY || i == dailyReturns.size() - 1) {
+                        weekly.add(Map.of("date", day.toString(), "cumulative", wealth - 1.0));
+                    }
                 }
             }
             maxDrawdownByYear.put(year, maxDrawdown); // snapshot as of this year-end either way
         }
 
-        return new DailySeries(annualizedVolFromDaily(allDailyReturns), maxDrawdown, maxDrawdownByYear);
+        return new DailySeries(annualizedVolFromDaily(allDailyReturns), maxDrawdown, maxDrawdownByYear, weekly);
     }
 
-    /** Equal-weighted daily portfolio returns over [from, to], using the first ticker's trading
-     * calendar as the reference dates (all this app's tickers are US-listed ETFs sharing
-     * essentially the same NYSE calendar — a reasonable simplification, not perfect). */
-    private List<Double> portfolioDailyReturns(List<String> tickers, Map<String, NavigableMap<LocalDate, BigDecimal>> closesByTicker,
-                                                LocalDate from, LocalDate to) {
+    /** The first ticker with data's own trading calendar over [from, to] — all this app's tickers
+     * are US-listed ETFs sharing essentially the same NYSE calendar, a reasonable simplification. */
+    private List<LocalDate> referenceDates(List<String> tickers, Map<String, NavigableMap<LocalDate, BigDecimal>> closesByTicker,
+                                            LocalDate from, LocalDate to) {
         if (tickers.isEmpty()) return List.of();
         NavigableMap<LocalDate, BigDecimal> reference = closesByTicker.get(tickers.get(0));
         if (reference == null || reference.isEmpty()) return List.of();
-        List<LocalDate> dates = new ArrayList<>(reference.subMap(from, true, to, true).keySet());
+        return new ArrayList<>(reference.subMap(from, true, to, true).keySet());
+    }
 
+    /** Equal-weighted daily portfolio returns across the given reference dates (see
+     * referenceDates) — one value per consecutive pair, so `dates.size() - 1` returns total. */
+    private List<Double> portfolioDailyReturns(List<String> tickers, Map<String, NavigableMap<LocalDate, BigDecimal>> closesByTicker,
+                                                List<LocalDate> dates) {
         List<Double> portfolioReturns = new ArrayList<>();
         for (int i = 1; i < dates.size(); i++) {
             LocalDate prev = dates.get(i - 1);
