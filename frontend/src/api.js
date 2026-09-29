@@ -58,4 +58,7 @@ export const api = {
   creditRotationFeatures: () => request(`/api/credit-rotation/features`),
   runCreditRotationBacktest: (body) => request(`/api/credit-rotation/backtest`, postJson(body)),
   runCreditRotationSweep: (body) => request(`/api/credit-rotation/sweep`, postJson(body)),
+
+  // FX (Portfolio Calculator: convert a USD-only strategy's returns to EUR)
+  getEurUsdYearEnd: (yearFrom, yearTo) => request(`/api/fx/eur-usd-year-end?yearFrom=${yearFrom}&yearTo=${yearTo}`),
 };

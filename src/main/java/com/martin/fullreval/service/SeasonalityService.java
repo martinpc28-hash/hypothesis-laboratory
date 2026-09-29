@@ -1651,13 +1651,13 @@ public class SeasonalityService {
         }
 
         Map<String, Object> stats = new LinkedHashMap<>();
-        stats.put("strategy", Map.of("cagr", strategyCagr, "volatility", strategyDaily.volatility(), "maxDrawdown", strategyDaily.maxDrawdown()));
-        stats.put("benchmark", Map.of("cagr", benchmarkCagr, "volatility", benchmarkDaily.volatility(), "maxDrawdown", benchmarkDaily.maxDrawdown()));
+        stats.put("strategy", Map.of("cagr", strategyCagr, "volatility", strategyDaily.volatility(), "maxDrawdown", strategyDaily.maxDrawdown(), "totalReturn", cumStrategy - 1.0));
+        stats.put("benchmark", Map.of("cagr", benchmarkCagr, "volatility", benchmarkDaily.volatility(), "maxDrawdown", benchmarkDaily.maxDrawdown(), "totalReturn", cumBenchmark - 1.0));
         if (includeSp500) {
-            stats.put("sp500", Map.of("cagr", sp500Cagr, "volatility", sp500Daily.volatility(), "maxDrawdown", sp500Daily.maxDrawdown()));
+            stats.put("sp500", Map.of("cagr", sp500Cagr, "volatility", sp500Daily.volatility(), "maxDrawdown", sp500Daily.maxDrawdown(), "totalReturn", cumSp500 - 1.0));
         }
         if (includeMsciWorld) {
-            stats.put("msciWorld", Map.of("cagr", msciWorldCagr, "volatility", msciDaily.volatility(), "maxDrawdown", msciDaily.maxDrawdown()));
+            stats.put("msciWorld", Map.of("cagr", msciWorldCagr, "volatility", msciDaily.volatility(), "maxDrawdown", msciDaily.maxDrawdown(), "totalReturn", cumMsciWorld - 1.0));
         }
 
         Map<String, Object> result = new LinkedHashMap<>();
