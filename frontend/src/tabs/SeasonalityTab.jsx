@@ -287,7 +287,10 @@ export default function SeasonalityTab({ setStatus, onTestResult, onMacroResult 
   return (
     <div>
       <div style={ui.card}>
-        <h2 style={ui.cardTitle}>Seasonality Hypothesis Lab</h2>
+        <div style={ui.eyebrow}>Seasonality · momentum de estacionalidad</div>
+        <h2 style={{ ...ui.cardTitle, fontSize: 26, fontWeight: 800, letterSpacing: "-0.02em", margin: "10px 0 12px" }}>
+          ¿Quien lidera al inicio del año sigue liderando el resto?
+        </h2>
         <p style={ui.cardSubtitle}>
           Do assets that outperform in an early window of the year go on to lead the rest of the year? Pick a
           universe, a data source, and a signal window (January-February by default) to test it.
@@ -755,7 +758,8 @@ function TestResults({ result, onAudit, macroResult, macroLoading, onRunMacroIns
       <CoverageStrip coverage={coverage} tickers={tickers} yearFrom={meta.yearFrom} yearTo={meta.yearTo} />
 
       <div style={ui.card}>
-        <h3 style={ui.cardTitle}>Return heatmap by year</h3>
+        <div style={ui.eyebrow}>Fig. 01</div>
+        <h3 style={{ ...ui.cardTitle, margin: "6px 0 12px" }}>Return heatmap by year</h3>
         <RankingHeatmaps
           panel={panel}
           sp500Panel={result.sp500Panel}
@@ -811,7 +815,8 @@ function TestResults({ result, onAudit, macroResult, macroLoading, onRunMacroIns
       </div>
 
       <div style={ui.card}>
-        <h3 style={ui.cardTitle}>Strategy performance</h3>
+        <div style={ui.eyebrow}>Fig. 02</div>
+        <h3 style={{ ...ui.cardTitle, margin: "6px 0 12px" }}>Strategy performance</h3>
         <p style={ui.cardSubtitle}>
           Equal-weighted portfolio of the top quartile by signal, bought at the end of the signal window and held
           through year-end, against the full equal-weighted universe over the same period (avoids look-ahead bias). S&amp;P
@@ -831,10 +836,14 @@ function TestResults({ result, onAudit, macroResult, macroLoading, onRunMacroIns
         <LineChart
           points={strategy.cumulative}
           series={[
-            { key: "cumulativeStrategy", label: "Top quartile", color: colors.primary },
-            { key: "cumulativeBenchmark", label: "Universe", color: colors.textMuted },
-            ...(strategy.sp500Available ? [{ key: "cumulativeSp500", label: "S&P 500", color: colors.warning }] : []),
-            ...(strategy.msciWorldAvailable ? [{ key: "cumulativeMsciWorld", label: "MSCI World", color: "#a78bfa" }] : []),
+            { key: "cumulativeStrategy", label: "Top quartile", color: colors.primary, width: 3 },
+            { key: "cumulativeBenchmark", label: "Universe", color: "#B48CFF", width: 1.8 },
+            ...(strategy.sp500Available
+              ? [{ key: "cumulativeSp500", label: "S&P 500", color: colors.warning, width: 1.8, dash: "5 4" }]
+              : []),
+            ...(strategy.msciWorldAvailable
+              ? [{ key: "cumulativeMsciWorld", label: "MSCI World", color: colors.textMuted, width: 1.8, dash: "5 4" }]
+              : []),
           ]}
         />
 
@@ -1333,10 +1342,12 @@ function MacroFilteredStrategySection({ macroFilteredStrategy, strategy, tickers
   const mergedCumulative = [...cumByYear.values()].sort((a, b) => a.year - b.year);
 
   const series = [
-    { key: "cumulativeStrategy", label: "Top quartile (signal only)", color: colors.primary },
-    { key: "cumulativeBenchmark", label: "Universe", color: colors.textMuted },
-    ...(strategy.sp500Available ? [{ key: "cumulativeSp500", label: "S&P 500", color: colors.warning }] : []),
-    { key: "cumulativeMacroFiltered", label: "Macro-filtered strategy", color: colors.success },
+    { key: "cumulativeStrategy", label: "Top quartile (signal only)", color: colors.primary, width: 1.8 },
+    { key: "cumulativeBenchmark", label: "Universe", color: "#B48CFF", width: 1.8 },
+    ...(strategy.sp500Available
+      ? [{ key: "cumulativeSp500", label: "S&P 500", color: colors.warning, width: 1.8, dash: "5 4" }]
+      : []),
+    { key: "cumulativeMacroFiltered", label: "Macro-filtered strategy", color: colors.success, width: 3 },
   ];
 
   const signalOnlyTotalReturn = strategy.cumulative.length

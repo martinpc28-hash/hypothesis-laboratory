@@ -76,7 +76,10 @@ export default function VixTimingTab({ setStatus, onResult }) {
   return (
     <div>
       <div style={ui.card}>
-        <h2 style={ui.cardTitle}>VIX Timing</h2>
+        <div style={ui.eyebrow}>VIX Timing · S&amp;P 500 vs. liquidez</div>
+        <h2 style={{ ...ui.cardTitle, fontSize: 26, fontWeight: 800, letterSpacing: "-0.02em", margin: "10px 0 12px" }}>
+          Acciones cuando el VIX se dispara, liquidez cuando se calma
+        </h2>
         <p style={ui.cardSubtitle}>
           Se mantiene el dinero en un monetario real (letra del Tesoro a 3 meses en USD, o depósito
           interbancario Euríbor 3M en EUR) hasta que el VIX (CBOE, vía FRED VIXCLS) cierra en {enterVix} o más —
@@ -150,9 +153,11 @@ function VixTimingResult({ result }) {
 
   const sp500Label = meta.hedged ? "S&P 500 EUR hedged (sintético)" : "S&P 500 buy & hold";
   const series = [
-    { key: "cumulativeStrategy", label: `VIX timing${meta.hedged ? " (hedged)" : ""}`, color: colors.success },
-    { key: "cumulativeSp500", label: sp500Label, color: colors.primary },
-    ...(msciWorldAvailable ? [{ key: "cumulativeMsciWorld", label: "MSCI World buy & hold", color: colors.warning }] : []),
+    { key: "cumulativeStrategy", label: `VIX timing${meta.hedged ? " (hedged)" : ""}`, color: colors.success, width: 3 },
+    { key: "cumulativeSp500", label: sp500Label, color: colors.warning, width: 1.8, dash: "5 4" },
+    ...(msciWorldAvailable
+      ? [{ key: "cumulativeMsciWorld", label: "MSCI World buy & hold", color: colors.textMuted, width: 1.8, dash: "5 4" }]
+      : []),
   ];
 
   const yearlyRows = yearlyReturnsFromCumulative(cumulative);
@@ -181,6 +186,22 @@ function VixTimingResult({ result }) {
           {meta.hedged ? "S&P 500 EUR hedged (sintético)" : "S&P 500"} con VIX ≥ {meta.enterVix} · sale con VIX ≤{" "}
           {meta.exitVix}
         </p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
+          {[
+            { label: `Retorno total · ${meta.currency}`, value: pct(stats.strategy.totalReturn), vs: pct(stats.sp500.totalReturn), tone: stats.strategy.totalReturn >= 0 ? colors.success : colors.danger },
+            { label: "CAGR", value: pct(stats.strategy.cagr), vs: pct(stats.sp500.cagr), tone: colors.text },
+            { label: "Volatilidad anualizada", value: pct(stats.strategy.volatility), vs: pct(stats.sp500.volatility), tone: colors.text },
+            { label: "Máx. drawdown", value: pct(stats.strategy.maxDrawdown), vs: pct(stats.sp500.maxDrawdown), tone: colors.danger },
+          ].map((t) => (
+            <div key={t.label} style={{ ...ui.statCard, flex: "1 1 200px", padding: "18px 20px" }}>
+              <div style={ui.statLabel}>{t.label}</div>
+              <div style={{ ...ui.statValue, fontSize: 30, color: t.tone }}>{t.value}</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12.5, color: colors.textMuted, marginTop: 8 }}>
+                S&amp;P 500: {t.vs}
+              </div>
+            </div>
+          ))}
+        </div>
         <div style={ui.tableScroll}>
           <table style={ui.table}>
             <thead>
@@ -249,7 +270,8 @@ function VixTimingResult({ result }) {
       </div>
 
       <div style={ui.card}>
-        <h3 style={ui.cardTitle}>Rentabilidad acumulada</h3>
+        <div style={ui.eyebrow}>Fig. 01</div>
+        <h3 style={{ ...ui.cardTitle, margin: "6px 0 12px" }}>Rentabilidad acumulada</h3>
         <LineChart points={cumulative} series={series} xKey="year" />
       </div>
 
