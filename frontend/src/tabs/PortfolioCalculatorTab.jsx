@@ -122,8 +122,10 @@ function informationRatio(portfolioReturns, benchmarkReturns) {
   return trackingError === 0 ? null : mean / trackingError;
 }
 
-const LEG_COLORS = [colors.primary, colors.warning, colors.success, colors.danger];
-const BENCHMARK_COLORS = [colors.warning, "#a78bfa"];
+// Legs and benchmarks never share a hue: S&P 500 used to be the same amber as VIX Timing, which
+// made the chart ambiguous. Legs are solid lines, benchmarks are dashed grey/amber.
+const LEG_COLORS = [colors.primary, "#B48CFF", colors.success, colors.danger];
+const BENCHMARK_COLORS = [colors.warning, colors.textMuted];
 
 // ---- Weekly-resolution chart data --------------------------------------------------------------
 // Everything above (weights, annual rebalancing, CAGR/vol/drawdown, the whole "Riesgo y retorno"
@@ -313,6 +315,7 @@ export default function PortfolioCalculatorTab({
   const [yearTo, setYearTo] = useState("");
   const [error, setError] = useState(null);
   const [calc, setCalc] = useState(null);
+  const [chartCcy, setChartCcy] = useState("usd");
 
   // Year-end USD-per-EUR rates, fetched once (covers the whole app's usable range) — used to
   // convert whichever currency a Seasonality/VIX Timing leg was run in into the other one, so the
@@ -594,12 +597,18 @@ export default function PortfolioCalculatorTab({
   // vs. calc.eur.points, passed separately to each LineChart) differ between the USD and EUR view.
   const series = useMemo(() => {
     if (!calc) return [];
-    const s = [{ key: "cumulativePortfolio", label: "Cartera combinada", color: colors.text }];
+    const s = [{ key: "cumulativePortfolio", label: "Cartera combinada", color: colors.text, width: 3 }];
     calc.legNames.forEach((name, i) => {
-      s.push({ key: `cumulativeLeg${i}`, label: name, color: LEG_COLORS[i % LEG_COLORS.length] });
+      s.push({ key: `cumulativeLeg${i}`, label: name, color: LEG_COLORS[i % LEG_COLORS.length], width: 1.8 });
     });
     calc.benchmarkNames.forEach((name, i) => {
-      s.push({ key: `cumulativeBenchmark${i}`, label: `${name} (referencia)`, color: BENCHMARK_COLORS[i % BENCHMARK_COLORS.length] });
+      s.push({
+        key: `cumulativeBenchmark${i}`,
+        label: `${name} (referencia)`,
+        color: BENCHMARK_COLORS[i % BENCHMARK_COLORS.length],
+        width: 1.8,
+        dash: "5 4",
+      });
     });
     return s;
   }, [calc]);
@@ -723,6 +732,21 @@ export default function PortfolioCalculatorTab({
             </tbody>
           </table>
         </div>
+        <div
+          role="img"
+          aria-label="Asignación entre estrategias"
+          style={{ display: "flex", height: 10, borderRadius: 999, overflow: "hidden", gap: 2, marginTop: 14 }}
+        >
+          {[
+            { on: seasonalityIncluded && seasonalityAvailable, w: Number(seasonalityWeight) || 0, c: LEG_COLORS[0] },
+            { on: vixIncluded && vixAvailable, w: Number(vixWeight) || 0, c: LEG_COLORS[1] },
+            { on: creditIncluded && creditAvailable, w: Number(creditWeight) || 0, c: LEG_COLORS[2] },
+          ]
+            .filter((x) => x.on && x.w > 0)
+            .map((x, i) => (
+              <div key={i} style={{ flex: x.w, background: x.c }} />
+            ))}
+        </div>
         <p style={{ ...ui.muted, marginTop: 8 }}>
           Suma de pesos ingresados: {totalEnteredWeight}% — no hace falta que sumen 100, se normalizan
           automáticamente entre las estrategias marcadas.
@@ -755,37 +779,56 @@ export default function PortfolioCalculatorTab({
             </div>
           )}
 
-          <div style={ui.card}>
-            <h3 style={ui.cardTitle}>
-              Evolución del dinero — USD ({calc.years[0]}–{calc.years[calc.years.length - 1]})
-            </h3>
-            <p style={{ ...ui.muted, marginTop: -4, marginBottom: 8 }}>
-              {calc.usd.weeklyPoints
-                ? "Cierres semanales (viernes) — se ve el movimiento real dentro de cada año, no solo el punto de fin de año."
-                : "Solo hay datos de fin de año disponibles para esta combinación — sin resolución semanal."}
-            </p>
-            <LineChart
-              points={calc.usd.weeklyPoints || calc.usd.points}
-              series={series}
-              xKey={calc.usd.weeklyPoints ? "date" : "year"}
-            />
-          </div>
-
-          <div style={ui.card}>
-            <h3 style={ui.cardTitle}>
-              Evolución del dinero — EUR ({calc.years[0]}–{calc.years[calc.years.length - 1]})
-            </h3>
-            <p style={{ ...ui.muted, marginTop: -4, marginBottom: 8 }}>
-              {calc.eur.weeklyPoints
-                ? "Cierres semanales (viernes) — se ve el movimiento real dentro de cada año, no solo el punto de fin de año."
-                : "Solo hay datos de fin de año disponibles para esta combinación — sin resolución semanal."}
-            </p>
-            <LineChart
-              points={calc.eur.weeklyPoints || calc.eur.points}
-              series={series}
-              xKey={calc.eur.weeklyPoints ? "date" : "year"}
-            />
-          </div>
+          {(() => {
+            const side = calc[chartCcy];
+            const weekly = !!side.weeklyPoints;
+            return (
+              <div style={ui.card}>
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                  <div>
+                    <div style={ui.eyebrow}>Fig. 01</div>
+                    <h3 style={{ ...ui.cardTitle, marginTop: 6 }}>
+                      Evolución del dinero — {chartCcy.toUpperCase()} ({calc.years[0]}–{calc.years[calc.years.length - 1]})
+                    </h3>
+                  </div>
+                  <div
+                    role="group"
+                    aria-label="Moneda del gráfico"
+                    style={{ display: "flex", padding: 3, borderRadius: 10, background: colors.surfaceAlt, border: `1px solid ${colors.border}` }}
+                  >
+                    {["usd", "eur"].map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        aria-pressed={chartCcy === c}
+                        onClick={() => setChartCcy(c)}
+                        style={{
+                          height: 34,
+                          padding: "0 18px",
+                          borderRadius: 8,
+                          border: "none",
+                          fontFamily: "inherit",
+                          fontSize: 13,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          background: chartCcy === c ? colors.primary : "transparent",
+                          color: chartCcy === c ? "#0B0C10" : colors.textMuted,
+                        }}
+                      >
+                        {c.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <p style={{ ...ui.muted, margin: "8px 0" }}>
+                  {weekly
+                    ? "Cierres semanales (viernes) — se ve el movimiento real dentro de cada año. Click en la leyenda para ocultar una serie."
+                    : "Solo hay datos de fin de año disponibles para esta combinación — sin resolución semanal."}
+                </p>
+                <LineChart points={side.weeklyPoints || side.points} series={series} xKey={weekly ? "date" : "year"} />
+              </div>
+            );
+          })()}
 
           <div style={ui.card}>
             <h3 style={ui.cardTitle}>Riesgo y retorno</h3>

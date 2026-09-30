@@ -75,7 +75,15 @@ export default function LineChart({ points, series, xKey = "year" }) {
           .join(" ");
         return (
           <g key={s.key}>
-            <path d={path} fill="none" stroke={s.color} strokeWidth={2} />
+            <path
+              d={path}
+              fill="none"
+              stroke={s.color}
+              strokeWidth={s.width ?? 2}
+              strokeDasharray={s.dash}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+            />
             {points.map((p, i) =>
               p[s.key] === null || p[s.key] === undefined ? null : (
                 <circle
