@@ -80,7 +80,7 @@ export default function HeatmapGrid({ rowLabels, colLabels, cells, rowLabelWidth
 export function divergingColor(value, maxAbs = 1) {
   if (value === null || value === undefined || Number.isNaN(value)) return colors.surfaceAlt;
   const t = Math.max(-1, Math.min(1, value / maxAbs));
-  const base = [68, 74, 87]; // matches theme.js colors.surfaceAlt
+  const base = [34, 36, 44]; // matches theme.js colors.surfaceAlt
   if (t >= 0) {
     const target = [22, 120, 74]; // success green
     const mix = base.map((b, i) => Math.round(b + t * (target[i] - b)));

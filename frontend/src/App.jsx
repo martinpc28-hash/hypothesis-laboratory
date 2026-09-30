@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api.js";
-import { shell, ui } from "./theme.js";
+import { colors, shell, ui } from "./theme.js";
 import InfoTab from "./tabs/InfoTab.jsx";
 import DashboardTab from "./tabs/DashboardTab.jsx";
 import PortfoliosTab from "./tabs/PortfoliosTab.jsx";
@@ -125,6 +125,10 @@ export default function App() {
     <div style={shell.app}>
       <header style={shell.header}>
         <div style={shell.brand}>
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={colors.accent} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M9 3h6M10 3v6.2L4.6 18.4A2 2 0 0 0 6.3 21.4h11.4a2 2 0 0 0 1.7-3L14 9.2V3" />
+            <path d="M7.5 14h9" />
+          </svg>
           <div>
             <p style={shell.brandTitle}>Hypothesis Laboratory</p>
           </div>
