@@ -1847,7 +1847,8 @@ function SweepResults({ result }) {
 
   return (
     <div style={ui.card}>
-      <h3 style={ui.cardTitle}>Window sweep</h3>
+      <div style={ui.eyebrow}>Fig. 03</div>
+      <h3 style={{ ...ui.cardTitle, margin: "6px 0 12px" }}>Window sweep</h3>
       <p style={ui.cardSubtitle}>
         Spearman correlation (signal vs. rest of year) for 1, 2, and 3-month windows starting in each month. If
         January-February stands out from the rest, the effect is seasonal; if all 2-month windows look
@@ -1899,7 +1900,10 @@ function MonteCarloSection({
   const defaultMinYears = Math.max(2, Math.round((mcYearTo - mcYearFrom + 1) / 2));
   return (
     <div style={ui.card}>
-      <h2 style={ui.cardTitle}>Combinatorial optimization (Monte Carlo)</h2>
+      <div style={ui.eyebrow}>Búsqueda combinatoria · Monte Carlo</div>
+      <h2 style={{ ...ui.cardTitle, fontSize: 26, fontWeight: 800, letterSpacing: "-0.02em", margin: "10px 0 12px" }}>
+        Combinatorial optimization
+      </h2>
       <p style={ui.cardSubtitle}>
         Tests EVERY valid combination of universe (sectors and/or countries — never mixed in the same
         portfolio) × signal window (start month × length), and ranks them by risk-adjusted return (CAGR ÷
@@ -2132,19 +2136,17 @@ function MonteCarloResults({ result }) {
           onClick={() => setPicksDetail(best)}
           title={isFixed ? "Click to confirm the chosen assets" : "Click to see which assets this combination picked each year"}
           style={{
-            background: colors.primarySoft,
-            border: `1px solid ${colors.border}`,
-            borderRadius: 10,
-            padding: 16,
+            background: colors.surfaceAlt,
+            border: `1px solid ${colors.accent}`,
+            borderRadius: 14,
+            padding: 20,
             marginTop: 8,
             marginBottom: 16,
             cursor: "pointer",
           }}
         >
-          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, color: colors.primary }}>
-            Optimal combination (highest {rankLabel})
-          </div>
-          <div style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>
+          <div style={ui.eyebrow}>Optimal combination (highest {rankLabel})</div>
+          <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: "-0.01em", marginTop: 8 }}>
             {UNIVERSE_LABELS[best.universe]} · Signal {windowLabel(best.startMonth, best.lengthMonths)}
           </div>
           {isFixed && (
@@ -2153,60 +2155,59 @@ function MonteCarloResults({ result }) {
               <span style={{ color: colors.textMuted, fontWeight: 400 }}>(the same ones for the whole period, no rotation)</span>
             </div>
           )}
-          <div style={{ display: "flex", gap: 20, flexWrap: "wrap", marginTop: 10, fontSize: 13.5 }}>
-            <span>
-              CAGR: <strong style={{ color: best.cagr >= 0 ? colors.success : colors.danger }}>{pct(best.cagr)}</strong>
-            </span>
-            <span>
-              Total return: <strong>{pct(best.totalReturn)}</strong>
-            </span>
-            <span>
-              Volatility: <strong>{pct(best.volatility)}</strong>
-            </span>
-            <span>
-              Max drawdown: <strong style={{ color: colors.danger }}>{pct(best.maxDrawdown)}</strong>
-            </span>
-            <span>
-              Years used: <strong>{best.yearsUsed}</strong>
-            </span>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 14 }}>
+            {[
+              { label: "CAGR", value: pct(best.cagr), tone: best.cagr >= 0 ? colors.success : colors.danger },
+              { label: "Total return", value: pct(best.totalReturn), tone: colors.text },
+              { label: "Volatility", value: pct(best.volatility), tone: colors.text },
+              { label: "Max drawdown", value: pct(best.maxDrawdown), tone: colors.danger },
+              { label: "Years used", value: String(best.yearsUsed), tone: colors.text },
+            ].map((t) => (
+              <div key={t.label} style={{ ...ui.statCard, flex: "1 1 150px", padding: "14px 16px", background: colors.surface }}>
+                <div style={ui.statLabel}>{t.label}</div>
+                <div style={{ ...ui.statValue, fontSize: 24, color: t.tone }}>{t.value}</div>
+              </div>
+            ))}
           </div>
-          <div style={{ marginTop: 10, fontSize: 12, color: colors.primary, fontWeight: 600 }}>
-            {isFixed ? "Click to confirm the chosen assets" : "Click to see which assets it picked each year"}
+          <div style={{ marginTop: 14, fontSize: 12.5, color: colors.accent, fontWeight: 700 }}>
+            {isFixed ? "Click to confirm the chosen assets" : "Click to see which assets it picked each year"} →
           </div>
         </div>
       )}
 
       <ComboScatter combos={combos} best={best} />
 
-      <div style={{ ...ui.tableScroll, marginTop: 16 }}>
+      <div style={{ ...ui.eyebrow, marginTop: 24 }}>Tabla 03</div>
+      <div style={{ ...ui.tableScroll, marginTop: 10 }}>
         <table style={ui.table}>
           <thead>
             <tr>
+              <th style={ui.th}>#</th>
               <th style={ui.th}>Universe</th>
               <th style={ui.th}>Signal window</th>
-              <th style={ui.th}>CAGR</th>
-              <th style={ui.th}>Total return</th>
-              <th style={ui.th}>Volatility</th>
-              <th style={ui.th}>Max Drawdown</th>
-              <th style={ui.th}>Score (CAGR/Vol)</th>
-              <th style={ui.th}>Years</th>
+              <th style={{ ...ui.th, textAlign: "right" }}>CAGR</th>
+              <th style={{ ...ui.th, textAlign: "right" }}>Total return</th>
+              <th style={{ ...ui.th, textAlign: "right" }}>Volatility</th>
+              <th style={{ ...ui.th, textAlign: "right" }}>Max Drawdown</th>
+              <th style={{ ...ui.th, textAlign: "right" }}>Score (CAGR/Vol)</th>
+              <th style={{ ...ui.th, textAlign: "right" }}>Years</th>
               <th style={ui.th}>Assets</th>
             </tr>
           </thead>
           <tbody>
             {combos.map((c, i) => (
               <tr key={`${c.universe}-${c.startMonth}-${c.lengthMonths}`} style={i === 0 ? { background: colors.primarySoft } : undefined}>
-                <td style={ui.td}>
-                  {i === 0 ? "* " : ""}
-                  {UNIVERSE_LABELS[c.universe]}
+                <td style={{ ...ui.td, fontFamily: "'IBM Plex Mono', monospace", color: i === 0 ? colors.accent : colors.textMuted, fontWeight: i === 0 ? 700 : 400 }}>
+                  {i + 1}
                 </td>
+                <td style={ui.td}>{UNIVERSE_LABELS[c.universe]}</td>
                 <td style={ui.td}>{windowLabel(c.startMonth, c.lengthMonths)}</td>
-                <td style={{ ...ui.td, color: c.cagr >= 0 ? colors.success : colors.danger, fontWeight: 700 }}>{pct(c.cagr)}</td>
-                <td style={ui.td}>{pct(c.totalReturn)}</td>
-                <td style={ui.td}>{pct(c.volatility)}</td>
-                <td style={{ ...ui.td, color: colors.danger }}>{pct(c.maxDrawdown)}</td>
-                <td style={ui.td}>{c.score.toFixed(2)}</td>
-                <td style={ui.td}>{c.yearsUsed}</td>
+                <td style={{ ...ui.td, textAlign: "right", color: c.cagr >= 0 ? colors.success : colors.danger, fontWeight: 700 }}>{pct(c.cagr)}</td>
+                <td style={{ ...ui.td, textAlign: "right" }}>{pct(c.totalReturn)}</td>
+                <td style={{ ...ui.td, textAlign: "right" }}>{pct(c.volatility)}</td>
+                <td style={{ ...ui.td, textAlign: "right", color: colors.danger }}>{pct(c.maxDrawdown)}</td>
+                <td style={{ ...ui.td, textAlign: "right" }}>{c.score.toFixed(2)}</td>
+                <td style={{ ...ui.td, textAlign: "right" }}>{c.yearsUsed}</td>
                 <td style={{ ...ui.td, whiteSpace: isFixed ? "normal" : "nowrap" }}>
                   {isFixed ? (
                     <span
