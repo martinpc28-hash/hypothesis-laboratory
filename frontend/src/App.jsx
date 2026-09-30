@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api.js";
 import { shell, ui } from "./theme.js";
+import InfoTab from "./tabs/InfoTab.jsx";
 import DashboardTab from "./tabs/DashboardTab.jsx";
 import PortfoliosTab from "./tabs/PortfoliosTab.jsx";
 import ScenariosTab from "./tabs/ScenariosTab.jsx";
@@ -36,6 +37,7 @@ function loadCurrentId(portfolios) {
 // Dashboard/Carteras/Escenarios hidden from the tab bar for now (still fully implemented
 // below, just not linked to — flip `hidden` back off whenever they're wanted again).
 const TABS = [
+  { key: "info", label: "Info" },
   { key: "dashboard", label: "Gráficos y métricas", hidden: true },
   { key: "portfolios", label: "Carteras", hidden: true },
   { key: "scenarios", label: "Escenarios de estrés", hidden: true },
@@ -48,7 +50,7 @@ const TABS = [
 export default function App() {
   const [portfolios, setPortfolios] = useState(loadPortfolios);
   const [currentPortfolioId, setCurrentPortfolioId] = useState(() => loadCurrentId(loadPortfolios()));
-  const [activeTab, setActiveTab] = useState("seasonality");
+  const [activeTab, setActiveTab] = useState("info");
   const [instruments, setInstruments] = useState([]);
   const [lastRunByPortfolio, setLastRunByPortfolio] = useState({});
   const [status, setStatus] = useState(null);
@@ -155,6 +157,8 @@ export default function App() {
         {status && (
           <div style={status.type === "error" ? ui.bannerError : ui.bannerSuccess}>{status.text}</div>
         )}
+
+        {activeTab === "info" && <InfoTab />}
 
         {activeTab === "dashboard" && (
           <DashboardTab
