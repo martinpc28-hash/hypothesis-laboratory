@@ -42,7 +42,7 @@ export const shell = {
     justifyContent: "space-between",
     flexWrap: "wrap",
     gap: 12,
-    padding: "14px 24px",
+    padding: "12px clamp(12px, 3vw, 24px)",
     background: colors.surface,
     borderBottom: `1px solid ${colors.border}`,
     position: "sticky",
@@ -55,7 +55,7 @@ export const shell = {
   tabBar: {
     display: "flex",
     gap: 4,
-    padding: "0 24px",
+    padding: "0 clamp(8px, 3vw, 24px)",
     background: colors.surface,
     borderBottom: `1px solid ${colors.border}`,
     overflowX: "auto",
@@ -64,7 +64,7 @@ export const shell = {
     display: "flex",
     alignItems: "center",
     gap: 8,
-    padding: "14px 18px",
+    padding: "14px clamp(12px, 2.5vw, 18px)",
     fontSize: 14,
     fontFamily: "inherit",
     fontWeight: active ? 700 : 600,
@@ -75,7 +75,7 @@ export const shell = {
     cursor: "pointer",
     whiteSpace: "nowrap",
   }),
-  main: { maxWidth: 1240, margin: "0 auto", padding: "24px" },
+  main: { maxWidth: 1240, margin: "0 auto", padding: "clamp(12px, 3vw, 24px)" },
 };
 
 export const ui = {
@@ -83,7 +83,7 @@ export const ui = {
     background: colors.surface,
     border: `1px solid ${colors.border}`,
     borderRadius: 14,
-    padding: 24,
+    padding: "clamp(14px, 4vw, 24px)",
     marginBottom: 20,
   },
   cardTitle: { margin: "0 0 4px 0", fontSize: 17, fontWeight: 700, letterSpacing: "-0.01em" },

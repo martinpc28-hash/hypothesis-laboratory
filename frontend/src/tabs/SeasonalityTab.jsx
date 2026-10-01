@@ -288,7 +288,7 @@ export default function SeasonalityTab({ setStatus, onTestResult, onMacroResult 
     <div>
       <div style={ui.card}>
         <div style={ui.eyebrow}>Seasonality · momentum de estacionalidad</div>
-        <h2 style={{ ...ui.cardTitle, fontSize: 26, fontWeight: 800, letterSpacing: "-0.02em", margin: "10px 0 12px" }}>
+        <h2 style={{ ...ui.cardTitle, fontSize: "clamp(20px, 5.5vw, 26px)", fontWeight: 800, letterSpacing: "-0.02em", margin: "10px 0 12px" }}>
           ¿Quien lidera al inicio del año sigue liderando el resto?
         </h2>
         <p style={ui.cardSubtitle}>
@@ -549,7 +549,7 @@ function CorrelationBlock({ title, corr, points, xLabel, yLabel }) {
 function PersistenceTable({ persistenceRest, persistenceFullYear }) {
   return (
     <div style={ui.tableScroll}>
-      <table style={ui.table}>
+      <table className="num-right" style={ui.table}>
         <thead>
           <tr>
             <th style={ui.th}>Comparison</th>
@@ -848,7 +848,7 @@ function TestResults({ result, onAudit, macroResult, macroLoading, onRunMacroIns
         />
 
         <div style={{ ...ui.tableScroll, marginTop: 12 }}>
-          <table style={ui.table}>
+          <table className="num-right" style={ui.table}>
             <thead>
               <tr>
                 <th style={ui.th}>Series</th>
@@ -888,7 +888,7 @@ function TestResults({ result, onAudit, macroResult, macroLoading, onRunMacroIns
         </p>
 
         <div style={{ ...ui.tableScroll, marginTop: 12 }}>
-          <table style={ui.table}>
+          <table className="num-right" style={ui.table}>
             <thead>
               <tr>
                 <th style={ui.th}>Year</th>
@@ -943,7 +943,7 @@ function TestResults({ result, onAudit, macroResult, macroLoading, onRunMacroIns
 
         {strategy.sp500Available && (
           <div style={{ ...ui.tableScroll, marginTop: 16 }}>
-            <table style={ui.table}>
+            <table className="num-right" style={ui.table}>
               <thead>
                 <tr>
                   <th style={ui.th}>Year</th>
@@ -1432,7 +1432,7 @@ function MacroFilteredStrategySection({ macroFilteredStrategy, strategy, tickers
       <LineChart points={mergedCumulative} series={series} />
 
       <div style={{ ...ui.tableScroll, marginTop: 12 }}>
-        <table style={ui.table}>
+        <table className="num-right" style={ui.table}>
           <thead>
             <tr>
               <th style={ui.th}>Series</th>
@@ -1543,7 +1543,7 @@ function MacroFilteredStrategySection({ macroFilteredStrategy, strategy, tickers
 
       {macroPerYearVsSp500.length > 0 && (
         <div style={{ ...ui.tableScroll, marginTop: 16 }}>
-          <table style={ui.table}>
+          <table className="num-right-4" style={ui.table}>
             <thead>
               <tr>
                 <th style={ui.th}>Year</th>
@@ -1901,7 +1901,7 @@ function MonteCarloSection({
   return (
     <div style={ui.card}>
       <div style={ui.eyebrow}>Búsqueda combinatoria · Monte Carlo</div>
-      <h2 style={{ ...ui.cardTitle, fontSize: 26, fontWeight: 800, letterSpacing: "-0.02em", margin: "10px 0 12px" }}>
+      <h2 style={{ ...ui.cardTitle, fontSize: "clamp(20px, 5.5vw, 26px)", fontWeight: 800, letterSpacing: "-0.02em", margin: "10px 0 12px" }}>
         Combinatorial optimization
       </h2>
       <p style={ui.cardSubtitle}>

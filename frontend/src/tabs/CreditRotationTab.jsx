@@ -201,7 +201,7 @@ export default function CreditRotationTab({ setStatus, onResult }) {
             <p style={ui.muted}>
               {sweepResult.meta.combinationsTested} combinaciones probadas · ranking en {sweepResult.meta.rankCurrency}.
             </p>
-            <table style={ui.table}>
+            <table className="num-right" style={ui.table}>
               <thead>
                 <tr>
                   <th style={ui.th}>Variable</th>
@@ -361,7 +361,7 @@ function CreditRotationResult({ result }) {
           reales nativos desde {meta.hyEurDataStart} (HY) y {meta.igEurDataStart} (IG) — sin conversión cambiaria
         </p>
         <div style={ui.tableScroll}>
-          <table style={ui.table}>
+          <table className="num-right" style={ui.table}>
             <thead>
               <tr>
                 <th style={ui.th}>Serie</th>
@@ -434,7 +434,7 @@ function CreditRotationResult({ result }) {
           muestran las fechas y precios exactos usados.
         </p>
         <div style={ui.tableScroll}>
-          <table style={ui.table}>
+          <table className="num-right" style={ui.table}>
             <thead>
               <tr>
                 <th style={ui.th}>Año</th>

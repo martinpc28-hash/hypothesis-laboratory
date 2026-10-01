@@ -77,7 +77,7 @@ export default function VixTimingTab({ setStatus, onResult }) {
     <div>
       <div style={ui.card}>
         <div style={ui.eyebrow}>VIX Timing · S&amp;P 500 vs. liquidez</div>
-        <h2 style={{ ...ui.cardTitle, fontSize: 26, fontWeight: 800, letterSpacing: "-0.02em", margin: "10px 0 12px" }}>
+        <h2 style={{ ...ui.cardTitle, fontSize: "clamp(20px, 5.5vw, 26px)", fontWeight: 800, letterSpacing: "-0.02em", margin: "10px 0 12px" }}>
           Acciones cuando el VIX se dispara, liquidez cuando se calma
         </h2>
         <p style={ui.cardSubtitle}>
@@ -203,7 +203,7 @@ function VixTimingResult({ result }) {
           ))}
         </div>
         <div style={ui.tableScroll}>
-          <table style={ui.table}>
+          <table className="num-right" style={ui.table}>
             <thead>
               <tr>
                 <th style={ui.th}>Estrategia</th>
@@ -354,7 +354,7 @@ function VixTimingResult({ result }) {
         </div>
 
         <div style={ui.tableScroll}>
-          <table style={ui.table}>
+          <table className="num-right" style={ui.table}>
             <thead>
               <tr>
                 <th style={ui.th}>Año</th>

@@ -16,6 +16,19 @@
         outline: 2px solid #5b8def;
         outline-offset: 2px;
       }
+      .num-right th:not(:first-child), .num-right td:not(:first-child) { text-align: right !important; }
+      .num-right-2 th:nth-child(n+3), .num-right-2 td:nth-child(n+3) { text-align: right !important; }
+      .num-right-4 th:nth-child(n+4), .num-right-4 td:nth-child(n+4) { text-align: right !important; }
+      /* Touch screens: 44px minimum targets, and no iOS zoom-on-focus (needs >=16px inputs). */
+      @media (pointer: coarse) {
+        button, select, input:not([type=checkbox]) { min-height: 44px; }
+        input:not([type=checkbox]), select, textarea { font-size: 16px !important; }
+      }
+      @media (max-width: 640px) {
+        h1, h2, h3 { overflow-wrap: anywhere; }
+        /* The two-row header would eat a third of a phone screen if it stayed pinned. */
+        header { position: static !important; }
+      }
     </style>
   </head>
   <body>

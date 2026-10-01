@@ -833,7 +833,7 @@ export default function PortfolioCalculatorTab({
           <div style={ui.card}>
             <h3 style={ui.cardTitle}>Riesgo y retorno</h3>
             <div style={ui.tableScroll}>
-              <table style={ui.table}>
+              <table className="num-right" style={ui.table}>
                 <thead>
                   <tr>
                     <th style={ui.th}></th>
@@ -945,7 +945,7 @@ export default function PortfolioCalculatorTab({
                 ruidosa que la que daría un IR calculado sobre retornos diarios.
               </p>
               <div style={ui.tableScroll}>
-                <table style={ui.table}>
+                <table className="num-right" style={ui.table}>
                   <thead>
                     <tr>
                       <th style={ui.th}></th>
