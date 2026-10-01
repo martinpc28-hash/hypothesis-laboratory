@@ -17,7 +17,7 @@ const TABS = [
     name: "Seasonality",
     badge: "primary",
     text:
-      "¿Un activo que lidera en una ventana temprana del año (por defecto enero-febrero) sigue liderando el resto del año? Prueba momentum de estacionalidad sobre sectores o países, con un backtest que evita look-ahead bias (compra recién al cerrar la ventana de señal), un filtro macro opcional (¿qué variable económica predice cuándo confiar en la señal?) y un sweep combinatorio (\"Monte Carlo\") que prueba cada combinación de universo/ventana.",
+      "¿Un activo que lidera en una ventana temprana del año (por defecto enero-febrero) sigue liderando el resto del año? Prueba momentum de estacionalidad sobre sectores o países, con un backtest que evita look-ahead bias (compra recién al cerrar la ventana de señal), un filtro macro opcional (¿qué variable económica predice cuándo confiar en la señal?) y un sweep combinatorio (\"Monte Carlo\") que prueba cada combinación de universo/ventana y destaca la óptima. Cada retorno es clickeable hasta el precio exacto que lo produjo.",
   },
   {
     name: "VIX Timing",
@@ -29,19 +29,19 @@ const TABS = [
     name: "Credit Rotation",
     badge: "success",
     text:
-      "La misma lógica de rotación táctica pero entre bonos high-yield e investment-grade, disparada por 7 variables macro candidatas (spread de crédito, VIX, curva de rendimientos, nivel/cambio de tasas, inflación, crecimiento). USD e EUR son series 100% reales e independientes — fondos Vanguard en USD y fondos UCITS europeos (vía EODHD) en EUR, sin conversión cambiaria en ningún lado.",
+      "La misma lógica de rotación táctica pero entre bonos high-yield e investment-grade, disparada por 7 variables macro candidatas (spread de crédito, VIX, curva de rendimientos, nivel/cambio de tasas, inflación, crecimiento). USD e EUR son series 100% reales e independientes — fondos Vanguard en USD y fondos UCITS europeos (vía EODHD) en EUR, sin conversión cambiaria en ningún lado. La tabla año a año es auditable: cada número abre las operaciones activas o las fechas y precios exactos de ese año.",
   },
   {
     name: "Calculadora",
     badge: "neutral",
     text:
-      "Combina los resultados YA corridos en las 3 pestañas anteriores con el % que le asignes a cada una, con rebalanceo anual. Siempre muestra USD y EUR por separado (convierte por tipo de cambio la que corrió en una sola moneda), grafica cierres semanales para ver el movimiento real, y calcula Sharpe, correlación e Information Ratio contra S&P 500 y MSCI World.",
+      "Combina los resultados YA corridos en las 3 pestañas anteriores con el % que le asignes a cada una, con rebalanceo anual. Siempre muestra USD y EUR por separado (convierte por tipo de cambio la que corrió en una sola moneda), grafica cierres semanales en un solo gráfico con selector USD | EUR, superpone S&P 500 y MSCI World, y calcula Sharpe, correlación e Information Ratio contra ambos.",
   },
 ];
 
 const STACK = [
   { layer: "Backend", tech: "Java 17, Spring Boot 3, Maven" },
-  { layer: "Frontend", tech: "React 18 + Vite — gráficos SVG hechos a mano (sin librería de charting), servidos como recursos estáticos del mismo jar de Spring Boot (un solo proceso, mismo origen, sin CORS)" },
+  { layer: "Frontend", tech: "React 18 + Vite — gráficos SVG hechos a mano (sin librería de charting), servidos como recursos estáticos del mismo jar de Spring Boot (un solo proceso, mismo origen, sin CORS). Diseño responsive: se usa también en celular (objetivos táctiles de 44px, gráficos que se adaptan al ancho). Tipografías Manrope + IBM Plex Mono" },
   { layer: "Persistencia", tech: "PostgreSQL (Amazon RDS) vía Hibernate — solo para el motor de revaluación (Dashboard/Carteras/Escenarios, oculto del nav hoy). Las 4 pestañas activas son stateless: se recalculan en cada corrida a partir de las fuentes de datos, sin guardar nada en base" },
   { layer: "Cómputo", tech: "Una instancia EC2, desplegada vía S3 + SSM Run Command (sin SSH, sin puerto 22 abierto)" },
 ];
@@ -64,7 +64,7 @@ const BACKEND_TREE = `src/main/java/com/martin/fullreval/
 ├── service/
 │   ├── SeasonalityService.java     motor de la estrategia de estacionalidad
 │   ├── VixTimingService.java       motor de rotación S&P 500 / cash
-│   ├── CreditRotationService.java  motor de rotación HY / IG
+│   ├── CreditRotationService.java  motor de rotación HY / IG (+ precios para auditar)
 │   ├── FxRateService.java          tasas EUR/USD (FRED) para conversión
 │   ├── YahooFinanceService.java    cliente de precios (crudo + ajustado)
 │   ├── FredClient.java             cliente de series FRED
@@ -80,11 +80,11 @@ const BACKEND_TREE = `src/main/java/com/martin/fullreval/
 const FRONTEND_TREE = `frontend/src/
 ├── App.jsx              shell: header, selector de cartera, barra de pestañas
 ├── api.js               TODAS las llamadas al backend, en un solo lugar
-├── theme.js             tokens de diseño compartidos (colores, ui.*)
+├── theme.js             tokens de diseño (colores, tipografías, ui.*)
 ├── LineChart.jsx         \\
 ├── ScatterChart.jsx       |  gráficos SVG propios — sin librería,
 ├── HeatmapGrid.jsx        |  leyenda clickeable (oculta/muestra series),
-├── AuditPanel.jsx         |  soporta año o fecha ISO en el eje X
+├── AuditPanel.jsx         |  se adaptan al ancho (celular), eje X año o fecha
 ├── InstrumentBarChart.jsx |
 ├── PnlHistogram.jsx      /
 └── tabs/
@@ -141,6 +141,31 @@ export default function InfoTab() {
             </div>
           ))}
         </div>
+      </div>
+
+      <div style={ui.card}>
+        <h3 style={ui.cardTitle}>Novedades</h3>
+        <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13.5, color: colors.text, lineHeight: 1.8 }}>
+          <li>
+            <strong>Calculadora:</strong> un solo gráfico con selector USD | EUR y cierres semanales, S&amp;P 500 y MSCI
+            World superpuestos, y métricas contra ambos (Sharpe, correlación, Information Ratio).
+          </li>
+          <li>
+            <strong>Credit Rotation auditable:</strong> la tabla año a año abre las operaciones activas o los precios
+            exactos de cada número.
+          </li>
+          <li>
+            <strong>Gráficos interactivos:</strong> clic en la leyenda para ocultar o mostrar una serie, en todas las
+            pestañas.
+          </li>
+          <li>
+            <strong>Rediseño:</strong> tema grafito con acento ámbar, cifras en tipografía monoespaciada y tablas con los
+            números alineados a la derecha.
+          </li>
+          <li>
+            <strong>Versión móvil:</strong> la misma dirección funciona en el celular.
+          </li>
+        </ul>
       </div>
 
       <div style={ui.card}>
