@@ -41,7 +41,7 @@ const TABS = [
     name: "Calculadora",
     badge: "neutral",
     text:
-      "Combina los resultados YA corridos en las pestañas anteriores con el % que le asignes a cada una, con rebalanceo anual. Siempre muestra USD y EUR por separado (convierte por tipo de cambio la que corrió en una sola moneda), grafica cierres semanales en un solo gráfico con selector USD | EUR, superpone S&P 500 y MSCI World, y calcula Sharpe, correlación e Information Ratio contra ambos. Volatilidad, drawdown y esas métricas se miden sobre cierres semanales (viernes), no sobre retornos anuales. Las métricas giran en torno a la cartera combinada: tarjetas con lo principal, una tabla contra los benchmarks (mejor y peor año y semana, peor caída con fechas y recuperación, VaR/CVaR, Sortino, Calmar, beta, tracking error y capturas alcista/bajista; con opción de mostrar cada estrategia), el retorno año por año con el exceso sobre el S&P 500 y la correlación entre las estrategias para ver cuánto diversifica la mezcla.",
+      "Combina los resultados YA corridos en las pestañas anteriores con el % que le asignes a cada una, con rebalanceo anual. Siempre muestra USD y EUR por separado (convierte por tipo de cambio la que corrió en una sola moneda), grafica cierres semanales en un solo gráfico con selector USD | EUR, superpone siempre S&P 500 y MSCI World (con su propio endpoint, no dependen de qué estrategias corriste), y calcula Sharpe, correlación e Information Ratio contra ambos. Volatilidad, drawdown y esas métricas se miden sobre cierres semanales (viernes), no sobre retornos anuales. Las métricas giran en torno a la cartera combinada: tarjetas con lo principal, una tabla contra los benchmarks (mejor y peor año y semana, peor caída con fechas y recuperación, VaR/CVaR, Sortino, Calmar, beta, tracking error y capturas alcista/bajista; con opción de mostrar cada estrategia), el retorno año por año con el exceso sobre el S&P 500 y la correlación entre las estrategias para ver cuánto diversifica la mezcla.",
   },
 ];
 
@@ -63,6 +63,7 @@ const BACKEND_TREE = `src/main/java/com/martin/fullreval/
 │   ├── SeasonalityController.java      /api/seasonality/*
 │   ├── VixTimingController.java        /api/vix-timing/*
 │   ├── SmallCapsController.java        /api/small-caps/*  (backtest, Monte Carlo, bootstrap)
+│   ├── BenchmarksController.java       /api/benchmarks  (S&P 500 y MSCI World para la Calculadora)
 │   ├── IlliquidsController.java        /api/illiquids/*
 │   ├── CreditRotationController.java   /api/credit-rotation/*  (pestaña oculta)
 │   └── FxController.java               /api/fx/*  (tipo de cambio para la Calculadora)
@@ -70,6 +71,7 @@ const BACKEND_TREE = `src/main/java/com/martin/fullreval/
 │   ├── SeasonalityService.java     motor de la estrategia de estacionalidad
 │   ├── VixTimingService.java       motor de rotación S&P 500 / cash
 │   ├── SmallCapsService.java       señales del paper, bono AAA, Monte Carlo y bootstrap
+│   ├── BenchmarksService.java      S&P 500 (rendimiento total) y MSCI World (índice de precio)
 │   ├── IlliquidsService.java       cartera de ilíquidos con proxies cotizados
 │   ├── CreditRotationService.java  motor de rotación HY / IG (oculto)
 │   ├── FxRateService.java          tasas EUR/USD (FRED) para conversión

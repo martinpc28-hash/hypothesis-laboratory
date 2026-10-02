@@ -68,6 +68,9 @@ export const api = {
   runSmallCapsMonteCarlo: (body) => request(`/api/small-caps/montecarlo`, postJson(body)),
   runSmallCapsBootstrap: (body) => request(`/api/small-caps/bootstrap`, postJson(body)),
 
+  // Reference series for the Calculadora: S&P 500 + MSCI World, always available
+  getBenchmarks: () => request(`/api/benchmarks`),
+
   // FX (Portfolio Calculator: convert a USD-only strategy's returns to EUR)
   getEurUsdYearEnd: (yearFrom, yearTo) => request(`/api/fx/eur-usd-year-end?yearFrom=${yearFrom}&yearTo=${yearTo}`),
 };

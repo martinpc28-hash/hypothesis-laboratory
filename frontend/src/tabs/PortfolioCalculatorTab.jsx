@@ -434,13 +434,12 @@ function CcyToggle({ ccy, setCcy }) {
 function FullMetricsCard({ data, ccy, setCcy }) {
   const [showLegs, setShowLegs] = useState(false);
   if (!data) return null;
-  const { cols, yearly, legCorr, benchNames, legNames } = data;
+  const { cols, yearly, legCorr, benchNames, legNames, benchBasis } = data;
   const port = cols[0].m;
   const hasWeekly = !!port.weeks;
   const shown = cols.filter((c) => c.kind !== "leg" || showLegs);
   const rows = [...BASE_ROWS, ...benchNames.flatMap(relRows)];
   const shortName = (n) => (n.length > 26 ? n.slice(0, 24) + "…" : n);
-  const refName = benchNames[0];
   const tiles = [
     { label: "CAGR", v: pct(port.cagr), c: tone(port.cagr) },
     { label: "Volatilidad", v: pct(port.volatility) },
@@ -496,6 +495,7 @@ function FullMetricsCard({ data, ccy, setCcy }) {
           Captura alcista / bajista: cuánto del movimiento del benchmark captura la cartera en las semanas en que sube /
           baja (bajista menor a 100% es bueno). Tracking error: volatilidad de la diferencia contra el benchmark;
           Information Ratio: exceso anualizado ÷ tracking error.
+          {benchBasis && benchBasis.some((b) => b.startsWith("MSCI")) && <> Referencias — {benchBasis.join("; ")}. El índice MSCI World de precio rinde cerca de 2 puntos por año menos que su versión con dividendos, así que la comparación lo favorece a la cartera.</>}
         </p>
         <div style={ui.tableScroll}>
           <table className="num-right" style={ui.table}>
@@ -544,29 +544,41 @@ function FullMetricsCard({ data, ccy, setCcy }) {
                 <th style={{ ...ui.th, color: colors.text }}>Cartera</th>
                 {showLegs && legNames.map((n, i) => <th key={`l${i}`} style={ui.th} title={n}>{shortName(n)}</th>)}
                 {benchNames.map((n, i) => <th key={`b${i}`} style={ui.th}>{n}</th>)}
-                {refName && <th style={ui.th}>Exceso vs {refName}</th>}
+                {benchNames.map((n, i) => <th key={`e${i}`} style={ui.th}>Exceso vs {n}</th>)}
               </tr>
             </thead>
             <tbody>
               {yearly.map((y) => {
-                const excess = refName && y.benchmarks[0] !== undefined ? y.portfolio - y.benchmarks[0] : undefined;
                 return (
                   <tr key={y.year}>
                     <td style={ui.td}>{y.year}</td>
                     <td style={{ ...ui.td, color: tone(y.portfolio), fontWeight: 700 }}>{cell(y.portfolio)}</td>
                     {showLegs && y.legs.map((v, i) => <td key={`l${i}`} style={{ ...ui.td, color: tone(v) }}>{cell(v)}</td>)}
                     {y.benchmarks.map((v, i) => <td key={`b${i}`} style={{ ...ui.td, color: tone(v) }}>{cell(v)}</td>)}
-                    {refName && <td style={{ ...ui.td, color: tone(excess) }}>{excess === undefined ? "—" : `${excess >= 0 ? "+" : ""}${(excess * 100).toFixed(1)} pp`}</td>}
+                    {y.benchmarks.map((v, i) => {
+                      const ex = v === undefined ? undefined : y.portfolio - v;
+                      return (
+                        <td key={`e${i}`} style={{ ...ui.td, color: tone(ex) }}>
+                          {ex === undefined ? "—" : `${ex >= 0 ? "+" : ""}${(ex * 100).toFixed(1)} pp`}
+                        </td>
+                      );
+                    })}
                   </tr>
                 );
               })}
             </tbody>
           </table>
         </div>
-        {refName && (
+        {benchNames.length > 0 && (
           <p style={{ ...ui.muted, marginTop: 8 }}>
-            La cartera superó a {refName} en {yearly.filter((y) => y.benchmarks[0] !== undefined && y.portfolio > y.benchmarks[0]).length} de{" "}
-            {yearly.filter((y) => y.benchmarks[0] !== undefined).length} años.
+            La cartera superó a{" "}
+            {benchNames
+              .map((n, i) => {
+                const have = yearly.filter((y) => y.benchmarks[i] !== undefined);
+                return `${n} en ${have.filter((y) => y.portfolio > y.benchmarks[i]).length} de ${have.length} años`;
+              })
+              .join(" y a ")}
+            .
           </p>
         )}
       </div>
@@ -652,6 +664,10 @@ export default function PortfolioCalculatorTab({
   const [fxRates, setFxRates] = useState(null);
   const [fxError, setFxError] = useState(null);
 
+  // S&P 500 + MSCI World from their own endpoint, so both references are always there whichever
+  // strategies are included (they used to ride along inside Seasonality's result only).
+  const [benchData, setBenchData] = useState(null);
+
   useEffect(() => {
     (async () => {
       try {
@@ -659,6 +675,16 @@ export default function PortfolioCalculatorTab({
         setFxRates(new Map(res.rates.map((r) => [r.year, r.usdPerEur])));
       } catch (e) {
         setFxError(`No se pudo cargar el tipo de cambio EUR/USD: ${e.message}`);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setBenchData(await api.getBenchmarks());
+      } catch {
+        setBenchData(null); // falls back to whatever the strategies carry
       }
     })();
   }, []);
@@ -695,6 +721,19 @@ export default function PortfolioCalculatorTab({
   // included leg already has the benchmark in BOTH real currencies (Credit Rotation) over one that
   // needs FX-converting (Seasonality, VIX Timing), so the comparison is as real as possible.
   function buildBenchmarks() {
+    if (benchData?.series?.length) {
+      return benchData.series.map((s) => {
+        const yearly = new Map(s.yearly.map((y) => [y.year, y.return]));
+        const weeklyNative = weeklyWealthEntries(s.weekly, "cumulative");
+        return {
+          name: s.name,
+          basis: s.basis,
+          ...toDualCurrency(yearly, "USD", fxRates),
+          weeklyUsdEntries: weeklyNative,
+          weeklyEurEntries: convertWeeklyEntries(weeklyNative, "USD", fxRates),
+        };
+      });
+    }
     const benchmarks = [];
 
     if (creditIncluded && creditAvailable && creditRotationResult.spyAvailable) {
@@ -1035,7 +1074,9 @@ export default function PortfolioCalculatorTab({
         matrix: series.map((a) => series.map((b) => pearson(a, b))),
       };
     }
-    return { cols, yearly, legCorr, benchNames: benchmarks.map((b) => b.name), legNames: normalized.map((l) => l.name) };
+    return { cols, yearly, legCorr, benchNames: benchmarks.map((b) => b.name),
+      benchBasis: benchmarks.map((b) => (b.basis ? b.name + ": " + b.basis : null)).filter(Boolean),
+      legNames: normalized.map((l) => l.name) };
   }
 
   // Swaps volatility / max drawdown / correlation / IR for their weekly-close versions on one

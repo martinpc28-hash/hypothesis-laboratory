@@ -15,7 +15,7 @@ precio exacto que lo produjo.
 | **VIX Timing** | Rotación entre S&P 500 y liquidez (letra del Tesoro a 3 meses o Euríbor) según el nivel del VIX: entra en acciones con VIX alto, vuelve a cash con VIX bajo. En USD o EUR corridos de forma independiente, con opción de cobertura cambiaria sintética. |
 | **Small Caps** | Estrategia armada a partir del paper del CFA Institute «Small Caps vs. Large Caps: The Cycle That's About to Turn». Tres señales con umbrales que se pueden mover: **ciclo** (spread de retorno a 10 años Russell 2000 − S&P 500), **valor relativo** (z-score de esa relación) y **tasas** (fed funds). Con suficientes señales encendidas mantiene small caps (Russell 2000, internacionales o global); si no, compra un **bono AAA** si su yield supera un mínimo (por defecto 4%) y lo mantiene hasta el vencimiento o lo vende cuando el yield cae lo suficiente; si el yield es bajo, se queda en letras del Tesoro. Incluye un **Monte Carlo** sobre los parámetros (¿depende el resultado de haber elegido justo estos números?) y un **bootstrap** en bloques de los retornos mensuales (¿cuánto es suerte del camino?). No modela P/B ni ROA del paper (sin datos históricos gratuitos), el bono usa el índice Aaa de Moody's como aproximación y no hay costos de transacción. |
 | **Ilíquidos** | Una cartera de inmobiliario, crédito privado, infraestructura y capital privado con los pesos que elijas y rebalanceo anual. Como no cotizan a diario (se valúan por tasación trimestral, que alisa las caídas), cada uno se representa con un **proxy cotizado con precio diario real** (VGSIX, FFRHX, XLU, VISVX; opcionales PSP y CSUAX), sin rendimientos inventados. Muestra también cómo se vería la misma cartera en un reporte trimestral, para medir cuánto riesgo esconde la tasación. |
-| **Calculadora** | Combina lo ya corrido en las pestañas anteriores con el % que asignes, con rebalanceo anual. Muestra siempre USD y EUR, un gráfico con cierres semanales y selector USD \| EUR, S&P 500 y MSCI World superpuestos, y Sharpe, correlación e Information Ratio contra ambos, con volatilidad y drawdown medidos sobre cierres semanales. Las métricas giran en torno a la cartera combinada: tarjetas con lo principal, una tabla contra los benchmarks (mejor y peor año y semana, peor caída con fechas y recuperación, VaR/CVaR 95%, Sortino, Calmar, beta, tracking error y capturas alcista/bajista; con opción de mostrar cada estrategia), el retorno año por año con el exceso sobre el S&P 500 y la correlación entre las estrategias. |
+| **Calculadora** | Combina lo ya corrido en las pestañas anteriores con el % que asignes, con rebalanceo anual. Muestra siempre USD y EUR, un gráfico con cierres semanales y selector USD \| EUR, S&P 500 y MSCI World siempre superpuestos (S&P 500 con dividendos reinvertidos; el MSCI World de Yahoo es el índice de precio, sin dividendos, así que rinde cerca de 2 puntos por año menos que su versión total), y Sharpe, correlación e Information Ratio contra ambos, con volatilidad y drawdown medidos sobre cierres semanales. Las métricas giran en torno a la cartera combinada: tarjetas con lo principal, una tabla contra los benchmarks (mejor y peor año y semana, peor caída con fechas y recuperación, VaR/CVaR 95%, Sortino, Calmar, beta, tracking error y capturas alcista/bajista; con opción de mostrar cada estrategia), el retorno año por año con el exceso sobre el S&P 500 y la correlación entre las estrategias. |
 
 Todos los gráficos tienen leyenda clickeable (oculta o muestra una serie) y las tablas numéricas alinean las
 cifras a la derecha.
@@ -54,11 +54,12 @@ cifras a la derecha.
 .
 ├── pom.xml
 ├── src/main/java/com/martin/fullreval/
-│   ├── controller/   Seasonality, VixTiming, SmallCaps, Illiquids, CreditRotation (oculta), Fx (tipo de cambio de la Calculadora)
+│   ├── controller/   Seasonality, VixTiming, SmallCaps, Illiquids, Benchmarks, CreditRotation (oculta), Fx (tipo de cambio de la Calculadora)
 │   ├── service/
 │   │   ├── SeasonalityService      estrategia de estacionalidad, filtro macro y Monte Carlo
 │   │   ├── VixTimingService        rotación S&P 500 / cash
 │   │   ├── SmallCapsService        señales del paper, bono AAA, Monte Carlo y bootstrap
+│   │   ├── BenchmarksService       S&P 500 y MSCI World para la Calculadora
 │   │   ├── IlliquidsService        cartera de ilíquidos con proxies cotizados
 │   │   ├── CreditRotationService   rotación HY / IG (pestaña oculta)
 │   │   ├── FxRateService           tasas EUR/USD (FRED)
