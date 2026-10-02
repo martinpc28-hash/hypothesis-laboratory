@@ -26,6 +26,12 @@ const TABS = [
       "Rotación táctica entre S&P 500 y liquidez (letra del Tesoro a 3 meses o Euríbor) según el nivel del VIX: entra en acciones con VIX alto, vuelve a cash con VIX bajo. Corre en USD o en EUR (con opción de cobertura cambiaria sintética) de forma completamente independiente, no por conversión.",
   },
   {
+    name: "Small Caps",
+    badge: "primary",
+    text:
+      "Estrategia basada en el paper «Small Caps vs. Large Caps: The Cycle That's About to Turn» (CFA Institute). Tres señales que puedes mover: ciclo (spread de retorno a 10 años del Russell 2000 contra el S&P 500), valor relativo (z-score de esa relación) y tasas (fed funds). Con suficientes señales encendidas compra small caps (Russell 2000 o internacionales); si no, compra un bono AAA con yield mínimo que elijas y lo mantiene hasta el vencimiento o lo vende cuando el yield cae mucho. Incluye Monte Carlo sobre los parámetros y bootstrap de los retornos para ver cuánto del resultado es robusto y cuánto es azar.",
+  },
+  {
     name: "Ilíquidos",
     badge: "success",
     text:
@@ -47,8 +53,8 @@ const STACK = [
 ];
 
 const DATA_SOURCES = [
-  { source: "Yahoo Finance", use: "Precios diarios de ETFs y fondos USD (ajustados por dividendos donde aplica) — sectores/países de Seasonality, S&P 500 y los proxies de Ilíquidos (VGSIX, FFRHX, XLU, VISVX, PSP, CSUAX)" },
-  { source: "FRED", use: "Series macro: VIX, T10Y2Y, DGS10, BAA10Y, CPIAUCSL, INDPRO, DTB3, DEXUSEU (tipo de cambio EUR/USD) — vía FredClient, con caché propio" },
+  { source: "Yahoo Finance", use: "Precios diarios de ETFs y fondos USD (ajustados por dividendos donde aplica) — sectores/países de Seasonality, S&P 500 y los proxies de Ilíquidos (VGSIX, FFRHX, XLU, VISVX, PSP, CSUAX), y IWM / DFISX / ^RUT / ^GSPC para Small Caps" },
+  { source: "FRED", use: "Series macro: VIX, T10Y2Y, DGS10, BAA10Y, CPIAUCSL, INDPRO, DTB3, DFF (fed funds), DAAA (yield Aaa de Moody's), DEXUSEU (tipo de cambio EUR/USD) — vía FredClient, con caché propio" },
   { source: "EODHD", use: "Dataset EUFUND — NAV real de fondos mutuos europeos con histórico profundo (Candriam/DPAM para el lado EUR de Credit Rotation, hoy oculta), algo que Yahoo Finance no expone más allá de ~3-4 años para fondos europeos" },
 ];
 
@@ -56,12 +62,14 @@ const BACKEND_TREE = `src/main/java/com/martin/fullreval/
 ├── controller/
 │   ├── SeasonalityController.java      /api/seasonality/*
 │   ├── VixTimingController.java        /api/vix-timing/*
+│   ├── SmallCapsController.java        /api/small-caps/*  (backtest, Monte Carlo, bootstrap)
 │   ├── IlliquidsController.java        /api/illiquids/*
 │   ├── CreditRotationController.java   /api/credit-rotation/*  (pestaña oculta)
 │   └── FxController.java               /api/fx/*  (tipo de cambio para la Calculadora)
 ├── service/
 │   ├── SeasonalityService.java     motor de la estrategia de estacionalidad
 │   ├── VixTimingService.java       motor de rotación S&P 500 / cash
+│   ├── SmallCapsService.java       señales del paper, bono AAA, Monte Carlo y bootstrap
 │   ├── IlliquidsService.java       cartera de ilíquidos con proxies cotizados
 │   ├── CreditRotationService.java  motor de rotación HY / IG (oculto)
 │   ├── FxRateService.java          tasas EUR/USD (FRED) para conversión
@@ -84,6 +92,7 @@ const FRONTEND_TREE = `frontend/src/
     ├── InfoTab.jsx               esta página
     ├── SeasonalityTab.jsx
     ├── VixTimingTab.jsx
+    ├── SmallCapsTab.jsx
     ├── IlliquidsTab.jsx
     ├── CreditRotationTab.jsx          (oculta)
     └── PortfolioCalculatorTab.jsx`;
@@ -108,8 +117,8 @@ export default function InfoTab() {
           que lo produjo.
         </p>
         <p style={ui.cardSubtitle}>
-          Dos estrategias sistemáticas — estacionalidad y market timing con VIX —, una cartera de ilíquidos y
-          una calculadora que las combina. Hoy la app muestra las cuatro pestañas de abajo.
+          Tres estrategias sistemáticas — estacionalidad, market timing con VIX y rotación small caps / bonos AAA —,
+          una cartera de ilíquidos y una calculadora que las combina. Hoy la app muestra las pestañas de abajo.
         </p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <span style={ui.badge("neutral")}>Java 17 · Spring Boot 3</span>
@@ -134,6 +143,13 @@ export default function InfoTab() {
       <div style={ui.card}>
         <h3 style={ui.cardTitle}>Novedades</h3>
         <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13.5, color: colors.text, lineHeight: 1.8 }}>
+          <li>
+            <strong>Small Caps:</strong> pestaña nueva con una estrategia armada a partir del paper del CFA Institute: tú
+            mueves los umbrales de las señales, el yield mínimo del bono AAA, el vencimiento y la regla de venta, y ves
+            el resultado contra comprar y mantener. Trae un Monte Carlo (¿y si los parámetros fueran otros?) y un
+            bootstrap (¿es suerte?). Limitaciones: no modela P/B ni ROA (sin datos gratis), el bono es una
+            aproximación con el índice Aaa de Moody's y no hay costos de transacción.
+          </li>
           <li>
             <strong>Calculadora:</strong> un solo gráfico con selector USD | EUR y cierres semanales, S&amp;P 500 y MSCI
             World superpuestos, y métricas contra ambos (Sharpe, correlación, Information Ratio).

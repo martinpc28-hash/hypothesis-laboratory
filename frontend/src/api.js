@@ -63,6 +63,11 @@ export const api = {
   getIlliquidSleeves: () => request(`/api/illiquids/sleeves`),
   runIlliquidsPortfolio: (body) => request(`/api/illiquids/portfolio`, postJson(body)),
 
+  // Small-cap cycle strategy (CFA Institute paper) + Monte Carlo / bootstrap
+  runSmallCapsBacktest: (body) => request(`/api/small-caps/backtest`, postJson(body)),
+  runSmallCapsMonteCarlo: (body) => request(`/api/small-caps/montecarlo`, postJson(body)),
+  runSmallCapsBootstrap: (body) => request(`/api/small-caps/bootstrap`, postJson(body)),
+
   // FX (Portfolio Calculator: convert a USD-only strategy's returns to EUR)
   getEurUsdYearEnd: (yearFrom, yearTo) => request(`/api/fx/eur-usd-year-end?yearFrom=${yearFrom}&yearTo=${yearTo}`),
 };

@@ -9,6 +9,7 @@ import SeasonalityTab from "./tabs/SeasonalityTab.jsx";
 import VixTimingTab from "./tabs/VixTimingTab.jsx";
 import CreditRotationTab from "./tabs/CreditRotationTab.jsx";
 import IlliquidsTab from "./tabs/IlliquidsTab.jsx";
+import SmallCapsTab from "./tabs/SmallCapsTab.jsx";
 import PortfolioCalculatorTab from "./tabs/PortfolioCalculatorTab.jsx";
 
 const PORTFOLIOS_KEY = "fullreval.portfolios";
@@ -44,6 +45,7 @@ const TABS = [
   { key: "scenarios", label: "Escenarios de estrés", hidden: true },
   { key: "seasonality", label: "Seasonality" },
   { key: "vixTiming", label: "VIX Timing" },
+  { key: "smallCaps", label: "Small Caps" },
   { key: "illiquids", label: "Ilíquidos" },
   { key: "creditRotation", label: "Credit Rotation", hidden: true },
   { key: "portfolioCalculator", label: "Calculadora" },
@@ -202,6 +204,7 @@ export default function App() {
 
         {activeTab === "vixTiming" && <VixTimingTab setStatus={setStatus} onResult={setVixTimingResult} />}
 
+        {activeTab === "smallCaps" && <SmallCapsTab setStatus={setStatus} />}
         {activeTab === "illiquids" && <IlliquidsTab setStatus={setStatus} onResult={setIlliquidsResult} />}
 
         {activeTab === "creditRotation" && (

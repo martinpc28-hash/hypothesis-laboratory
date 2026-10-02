@@ -13,6 +13,7 @@ precio exacto que lo produjo.
 | **Info** | Explica el proyecto, la arquitectura y las novedades (es la primera ventana). |
 | **Seasonality** | ¿Un activo que lidera en una ventana temprana del año (por defecto enero-febrero) sigue liderando el resto? Momentum de estacionalidad sobre sectores o países, con backtest sin look-ahead bias, filtro macro opcional y búsqueda combinatoria («Monte Carlo») que prueba cada combinación de universo y ventana y destaca la óptima. Cada retorno es clickeable hasta el precio exacto. |
 | **VIX Timing** | Rotación entre S&P 500 y liquidez (letra del Tesoro a 3 meses o Euríbor) según el nivel del VIX: entra en acciones con VIX alto, vuelve a cash con VIX bajo. En USD o EUR corridos de forma independiente, con opción de cobertura cambiaria sintética. |
+| **Small Caps** | Estrategia armada a partir del paper del CFA Institute «Small Caps vs. Large Caps: The Cycle That's About to Turn». Tres señales con umbrales que se pueden mover: **ciclo** (spread de retorno a 10 años Russell 2000 − S&P 500), **valor relativo** (z-score de esa relación) y **tasas** (fed funds). Con suficientes señales encendidas mantiene small caps (Russell 2000, internacionales o global); si no, compra un **bono AAA** si su yield supera un mínimo (por defecto 4%) y lo mantiene hasta el vencimiento o lo vende cuando el yield cae lo suficiente; si el yield es bajo, se queda en letras del Tesoro. Incluye un **Monte Carlo** sobre los parámetros (¿depende el resultado de haber elegido justo estos números?) y un **bootstrap** en bloques de los retornos mensuales (¿cuánto es suerte del camino?). No modela P/B ni ROA del paper (sin datos históricos gratuitos), el bono usa el índice Aaa de Moody's como aproximación y no hay costos de transacción. |
 | **Ilíquidos** | Una cartera de inmobiliario, crédito privado, infraestructura y capital privado con los pesos que elijas y rebalanceo anual. Como no cotizan a diario (se valúan por tasación trimestral, que alisa las caídas), cada uno se representa con un **proxy cotizado con precio diario real** (VGSIX, FFRHX, XLU, VISVX; opcionales PSP y CSUAX), sin rendimientos inventados. Muestra también cómo se vería la misma cartera en un reporte trimestral, para medir cuánto riesgo esconde la tasación. |
 | **Calculadora** | Combina lo ya corrido en las pestañas anteriores con el % que asignes, con rebalanceo anual. Muestra siempre USD y EUR, un gráfico con cierres semanales y selector USD \| EUR, S&P 500 y MSCI World superpuestos, y Sharpe, correlación e Information Ratio contra ambos. |
 
@@ -42,8 +43,8 @@ cifras a la derecha.
 
 | Fuente | Uso |
 |---|---|
-| Yahoo Finance | Precios diarios de ETFs y fondos en USD (ajustados por dividendos donde aplica): sectores y países de Seasonality, S&P 500 y los proxies de Ilíquidos |
-| FRED | Series macro (VIX, T10Y2Y, DGS10, BAA10Y, CPIAUCSL, INDPRO, DTB3) y tipo de cambio EUR/USD (DEXUSEU) |
+| Yahoo Finance | Precios diarios de ETFs y fondos en USD (ajustados por dividendos donde aplica): sectores y países de Seasonality, S&P 500, los proxies de Ilíquidos y IWM / DFISX / ^RUT / ^GSPC para Small Caps |
+| FRED | Series macro (VIX, T10Y2Y, DGS10, BAA10Y, CPIAUCSL, INDPRO, DTB3, DFF, DAAA) y tipo de cambio EUR/USD (DEXUSEU) |
 | EODHD | Dataset EUFUND: NAV real de fondos europeos con historia profunda (el lado EUR de Credit Rotation, hoy oculta). Yahoo no expone más de ~3-4 años de esos fondos |
 
 ## Estructura del proyecto
@@ -52,10 +53,11 @@ cifras a la derecha.
 .
 ├── pom.xml
 ├── src/main/java/com/martin/fullreval/
-│   ├── controller/   Seasonality, VixTiming, Illiquids, CreditRotation (oculta), Fx (tipo de cambio de la Calculadora)
+│   ├── controller/   Seasonality, VixTiming, SmallCaps, Illiquids, CreditRotation (oculta), Fx (tipo de cambio de la Calculadora)
 │   ├── service/
 │   │   ├── SeasonalityService      estrategia de estacionalidad, filtro macro y Monte Carlo
 │   │   ├── VixTimingService        rotación S&P 500 / cash
+│   │   ├── SmallCapsService        señales del paper, bono AAA, Monte Carlo y bootstrap
 │   │   ├── IlliquidsService        cartera de ilíquidos con proxies cotizados
 │   │   ├── CreditRotationService   rotación HY / IG (pestaña oculta)
 │   │   ├── FxRateService           tasas EUR/USD (FRED)
@@ -74,7 +76,7 @@ cifras a la derecha.
         ├── api.js            todas las llamadas al backend
         ├── theme.js          tokens de diseño (colores, tipografías, estilos)
         ├── LineChart.jsx, ScatterChart.jsx, HeatmapGrid.jsx, AuditPanel.jsx ...
-        └── tabs/             Info, Seasonality, VixTiming, Illiquids, PortfolioCalculator (+ CreditRotation, oculta)
+        └── tabs/             Info, Seasonality, VixTiming, SmallCaps, Illiquids, PortfolioCalculator (+ CreditRotation, oculta)
 ```
 
 ## Correrlo en local
