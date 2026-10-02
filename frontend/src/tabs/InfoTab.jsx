@@ -191,19 +191,22 @@ export default function InfoTab() {
 
       <div style={ui.card}>
         <h3 style={ui.cardTitle}>Cómo se despliega</h3>
-        <p style={ui.cardSubtitle}>Sin SSH, sin llaves — todo remoto vía la API de AWS:</p>
+        <p style={ui.cardSubtitle}>
+          Automático: cada push a <code>master</code> despliega solo (GitHub Actions). Sin SSH y sin llaves guardadas.
+        </p>
         <ol style={{ margin: 0, paddingLeft: 20, fontSize: 13.5, color: colors.text, lineHeight: 1.8 }}>
           <li>
-            <code>npm run build</code> en <code>frontend/</code>, el resultado se copia a{" "}
-            <code>src/main/resources/static/</code>
+            Actions compila el frontend (<code>npm run build</code>) y lo mete en el jar con{" "}
+            <code>mvn package</code>
           </li>
           <li>
-            <code>mvn clean package</code> produce un jar único con el frontend ya adentro
+            Pide a AWS credenciales temporales por <strong>OIDC</strong> para un rol que solo puede subir ese jar y
+            lanzar un comando SSM, y solo desde la rama <code>master</code>
           </li>
-          <li>El jar se sube a un bucket S3 privado (URL pre-firmada)</li>
+          <li>El jar se sube a un bucket S3 privado</li>
           <li>
-            Un comando <strong>SSM Run Command</strong> (no SSH) le dice a la instancia EC2 que pare el servicio{" "}
-            <code>systemd</code> <code>fullreval</code>, baje el jar nuevo de S3, y reinicie
+            Un <strong>SSM Run Command</strong> le dice a la instancia EC2 que pare el servicio <code>fullreval</code>,
+            baje el jar nuevo y reinicie; el último paso verifica que la app responda
           </li>
           <li>
             Los secretos (password de la base, API key de EODHD) viven en <strong>SSM Parameter Store</strong>{" "}

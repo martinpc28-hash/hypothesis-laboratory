@@ -90,10 +90,17 @@ Variables de entorno opcionales: `EODHD_API_KEY` (sin ella, Credit Rotation no p
 
 ## Cómo se despliega
 
-1. `npm run build` en `frontend/` y copiar `dist/` a `src/main/resources/static/`.
-2. `mvn clean package` produce un jar único con el frontend adentro.
-3. El jar se sube a un bucket S3 privado (URL pre-firmada).
+Es automático: **cada push a `master` despliega** (workflow `.github/workflows/deploy.yml`, también se puede
+lanzar a mano desde la pestaña Actions).
+
+1. GitHub Actions compila el frontend (`npm run build`) y lo copia a `src/main/resources/static/`.
+2. `mvn package` produce un jar único con el frontend adentro.
+3. Sin llaves guardadas: GitHub pide a AWS credenciales temporales por **OIDC** para el rol
+   `hypothesis-lab-github-deploy`, que solo puede subir ese jar al bucket S3 y lanzar un comando SSM en esa
+   instancia, y solo desde la rama `master` de este repo.
 4. Un **SSM Run Command** (sin SSH, sin puerto 22) le pide a la instancia que pare el servicio `fullreval`
-   (systemd), baje el jar y reinicie.
+   (systemd), baje el jar y reinicie. El último paso verifica que la app responda 200.
 5. Los secretos (contraseña de la base, API key de EODHD) viven en **SSM Parameter Store** (SecureString) y
    un script de arranque los exporta como variables de entorno: no están en el jar ni en este repo.
+
+En el repo hay dos variables de Actions (no secretos): `AWS_ROLE_ARN` y `APP_URL`.
