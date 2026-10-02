@@ -130,7 +130,7 @@ export default function App() {
             <path d="M7.5 14h9" />
           </svg>
           <div>
-            <p style={shell.brandTitle}>Contraste</p>
+            <p style={shell.brandTitle}>Hypothesis Laboratory</p>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

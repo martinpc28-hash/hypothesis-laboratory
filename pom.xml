@@ -14,7 +14,7 @@
     <groupId>com.martin</groupId>
     <artifactId>full-revaluation</artifactId>
     <version>0.1.0</version>
-    <name>Contraste</name>
+    <name>Hypothesis Laboratory</name>
     <description>Seasonality hypothesis testing lab for sectors and countries, built on top of a full-revaluation market risk engine, deployed on AWS</description>
 
     <properties>

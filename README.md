@@ -1,9 +1,8 @@
-# Contraste
+# Hypothesis Laboratory
 
 Un laboratorio para probar hipótesis de trading sistemático contra datos históricos reales. No son
 backtests de caja negra: cada número (retorno, drawdown, operación) se puede auditar hasta la fecha y el
-precio exacto que lo produjo. El nombre viene del «contraste de hipótesis» estadístico, y también de
-contrastar cada estrategia contra el S&P 500, el MSCI World y la realidad en euros.
+precio exacto que lo produjo.
 
 **App en vivo:** http://3.227.208.53:8080/ (funciona también en el celular)
 
