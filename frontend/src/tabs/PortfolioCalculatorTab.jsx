@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api.js";
 import { ui, colors } from "../theme.js";
 import LineChart from "../LineChart.jsx";
+import { computeMetrics } from "../portfolioMetrics.js";
 
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -347,6 +348,140 @@ function buildWeeklyChart(normalized, benchmarks, sortedYears, entriesKey) {
   return points;
 }
 
+function months(weeks) {
+  return weeks === undefined || weeks === null ? "—" : `${Math.round((weeks / 52) * 12)} meses`;
+}
+function num2(v) {
+  return v === undefined || v === null || Number.isNaN(v) ? "—" : v.toFixed(2);
+}
+const tone = (v) => (v === undefined || v === null ? undefined : v >= 0 ? colors.success : colors.danger);
+
+const METRIC_ROWS = [
+  { section: "Retorno" },
+  { label: "Retorno total", f: (m) => pct(m.totalReturn), t: (m) => tone(m.totalReturn) },
+  { label: "CAGR", f: (m) => pct(m.cagr), t: (m) => tone(m.cagr) },
+  { section: "Años calendario" },
+  { label: "Mejor año", f: (m) => (m.bestYear ? `${pct(m.bestYear.value)} · ${m.bestYear.year}` : "—"), t: (m) => tone(m.bestYear?.value) },
+  { label: "Peor año", f: (m) => (m.worstYear ? `${pct(m.worstYear.value)} · ${m.worstYear.year}` : "—"), t: (m) => tone(m.worstYear?.value) },
+  { label: "Años positivos", f: (m) => (m.totalYears ? `${m.positiveYears} de ${m.totalYears} (${pct(m.positiveYears / m.totalYears, 0)})` : "—") },
+  { section: "Semanas" },
+  { label: "Mejor semana", f: (m) => (m.bestWeek ? `${pct(m.bestWeek.value)} · ${m.bestWeek.date}` : "—"), t: (m) => tone(m.bestWeek?.value) },
+  { label: "Peor semana", f: (m) => (m.worstWeek ? `${pct(m.worstWeek.value)} · ${m.worstWeek.date}` : "—"), t: (m) => tone(m.worstWeek?.value) },
+  { label: "Semanas positivas", f: (m) => pct(m.positiveWeeks, 0) },
+  { section: "Caídas" },
+  { label: "Peor caída", f: (m) => pct(m.maxDrawdown), t: () => colors.danger },
+  { label: "Desde → mínimo", f: (m) => (m.ddPeakDate ? `${m.ddPeakDate} → ${m.ddTroughDate}` : "—") },
+  { label: "Recuperada el", f: (m) => (m.ddPeakDate ? m.ddRecoveryDate || "sin recuperar" : "—") },
+  { label: "Mayor tiempo bajo el máximo", f: (m) => months(m.longestUnderwaterWeeks) },
+  { label: "Caída actual", f: (m) => pct(m.currentDrawdown), t: (m) => (m.currentDrawdown < -0.0005 ? colors.danger : undefined) },
+  { section: "Riesgo (semanal, anualizado)" },
+  { label: "Volatilidad", f: (m) => pct(m.volatility) },
+  { label: "Desviación a la baja", f: (m) => pct(m.downsideDeviation) },
+  { label: "VaR 95% semanal", f: (m) => pct(m.var95), t: () => colors.danger },
+  { label: "CVaR 95% semanal", f: (m) => pct(m.cvar95), t: () => colors.danger },
+  { section: "Ajustado por riesgo" },
+  { label: "Sharpe (CAGR ÷ vol.)", f: (m) => num2(m.sharpe) },
+  { label: "Sortino (CAGR ÷ desv. a la baja)", f: (m) => num2(m.sortino) },
+  { label: "Calmar (CAGR ÷ peor caída)", f: (m) => num2(m.calmar) },
+  { section: "Frente al S&P 500 (semanal)" },
+  { label: "Beta", f: (m) => num2(m.beta) },
+  { label: "Captura alcista", f: (m) => pct(m.upCapture, 0) },
+  { label: "Captura bajista", f: (m) => pct(m.downCapture, 0) },
+];
+
+function FullMetricsCard({ cols, ccy, setCcy }) {
+  if (!cols) return null;
+  const hasWeekly = cols.some((c) => c.m.weeks);
+  const shortName = (n) => (n.length > 26 ? n.slice(0, 24) + "…" : n);
+  return (
+    <div style={ui.card}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <div>
+          <div style={ui.eyebrow}>Tabla 02</div>
+          <h3 style={{ ...ui.cardTitle, marginTop: 6 }}>Métricas completas</h3>
+        </div>
+        <div
+          role="group"
+          aria-label="Moneda de las métricas"
+          style={{ display: "flex", padding: 3, borderRadius: 10, background: colors.surfaceAlt, border: `1px solid ${colors.border}` }}
+        >
+          {["usd", "eur"].map((c) => (
+            <button
+              key={c}
+              type="button"
+              aria-pressed={ccy === c}
+              onClick={() => setCcy(c)}
+              style={{
+                height: 34,
+                padding: "0 18px",
+                borderRadius: 8,
+                border: "none",
+                fontFamily: "inherit",
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: "pointer",
+                background: ccy === c ? colors.primary : "transparent",
+                color: ccy === c ? "#0B0C10" : colors.textMuted,
+              }}
+            >
+              {c.toUpperCase()}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p style={{ ...ui.cardSubtitle, marginTop: 8 }}>
+        Mejor y peor año son años calendario de la mezcla anual. Semanas, caídas, VaR, Sortino, beta y capturas salen de
+        los cierres de viernes.{" "}
+        {hasWeekly ? "" : "No hay datos semanales suficientes: solo se muestran las cifras anuales. "}
+        VaR 95%: la semana que se supera solo 1 de cada 20 veces; CVaR: el promedio de las semanas peores que esa.
+        Captura alcista / bajista: cuánto del movimiento del S&amp;P 500 captura en las semanas en que sube / baja
+        (bajista menor a 100% es bueno).
+        {ccy === "eur" && " En EUR es una aproximación (ver nota arriba)."}
+      </p>
+      <div style={ui.tableScroll}>
+        <table className="num-right" style={ui.table}>
+          <thead>
+            <tr>
+              <th style={ui.th}>Métrica</th>
+              {cols.map((c, i) => (
+                <th key={i} style={{ ...ui.th, whiteSpace: "normal", minWidth: 120, color: c.kind === "portfolio" ? colors.text : undefined }} title={c.name}>
+                  {shortName(c.name)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {METRIC_ROWS.map((r, ri) =>
+              r.section ? (
+                <tr key={ri}>
+                  <td
+                    colSpan={cols.length + 1}
+                    style={{ ...ui.td, ...ui.eyebrow, fontSize: 11, paddingTop: 14, textAlign: "left" }}
+                  >
+                    {r.section}
+                  </td>
+                </tr>
+              ) : (
+                <tr key={ri}>
+                  <td style={ui.td}>{r.label}</td>
+                  {cols.map((c, ci) => (
+                    <td
+                      key={ci}
+                      style={{ ...ui.td, color: r.t ? r.t(c.m) : undefined, fontWeight: c.kind === "portfolio" ? 700 : 400 }}
+                    >
+                      {r.f(c.m)}
+                    </td>
+                  ))}
+                </tr>
+              )
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function PortfolioCalculatorTab({
   seasonalityTestResult,
   seasonalityMacroResult,
@@ -383,6 +518,7 @@ export default function PortfolioCalculatorTab({
   const [error, setError] = useState(null);
   const [calc, setCalc] = useState(null);
   const [chartCcy, setChartCcy] = useState("usd");
+  const [metricsCcy, setMetricsCcy] = useState("usd");
 
   // Year-end USD-per-EUR rates, fetched once (covers the whole app's usable range) — used to
   // convert whichever currency a Seasonality/VIX Timing leg was run in into the other one, so the
@@ -700,6 +836,8 @@ export default function PortfolioCalculatorTab({
 
     applyWeeklyMetrics(usd, benchmarkMetricsUsd);
     applyWeeklyMetrics(eur, benchmarkMetricsEur);
+    usd.fullMetrics = buildFullMetrics(usd, normalized, benchmarks, sortedYears, "returnsUsd");
+    eur.fullMetrics = buildFullMetrics(eur, normalized, benchmarks, sortedYears, "returnsEur");
 
     setCalc({
       years: sortedYears,
@@ -713,6 +851,49 @@ export default function PortfolioCalculatorTab({
       sharpeUsd: usd.portfolioStats.volatility ? usd.portfolioStats.cagr / usd.portfolioStats.volatility : null,
       sharpeEur: eur.portfolioStats.volatility ? eur.portfolioStats.cagr / eur.portfolioStats.volatility : null,
     });
+  }
+
+  // One column per series (combined portfolio, each leg, each benchmark) for the "Métricas completas"
+  // table. Weekly closes feed the drawdown/week/VaR/beta figures; the annual blend feeds the
+  // calendar-year ones. Beta and capture ratios are measured against the S&P 500 when it's present.
+  function buildFullMetrics(side, normalized, benchmarks, sortedYears, returnsKey) {
+    const pts = side.weeklyPoints;
+    const levels = (key) => (pts ? pts.map((p) => [p.date, 1 + (p[key] ?? 0)]) : null);
+    const spIdx = benchmarks.findIndex((b) => b.name === "S&P 500");
+    const spWeekly = pts && spIdx >= 0 ? weeklyReturnsOf(pts, `cumulativeBenchmark${spIdx}`) : null;
+    const cols = [
+      {
+        name: "Cartera combinada",
+        kind: "portfolio",
+        m: computeMetrics({ years: sortedYears, annual: side.blendedReturns, weekly: levels("cumulativePortfolio"), benchWeekly: spWeekly }),
+      },
+    ];
+    normalized.forEach((l, i) => {
+      cols.push({
+        name: l.name,
+        kind: "leg",
+        m: computeMetrics({
+          years: sortedYears,
+          annual: sortedYears.map((y) => l[returnsKey].get(y) ?? 0),
+          weekly: levels(`cumulativeLeg${i}`),
+          benchWeekly: spWeekly,
+        }),
+      });
+    });
+    benchmarks.forEach((b, bi) => {
+      const yrs = sortedYears.filter((y) => b[returnsKey].get(y) !== undefined);
+      cols.push({
+        name: b.name,
+        kind: "benchmark",
+        m: computeMetrics({
+          years: yrs,
+          annual: yrs.map((y) => b[returnsKey].get(y)),
+          weekly: levels(`cumulativeBenchmark${bi}`),
+          benchWeekly: null,
+        }),
+      });
+    });
+    return cols;
   }
 
   // Swaps volatility / max drawdown / correlation / IR for their weekly-close versions on one
@@ -1138,6 +1319,8 @@ export default function PortfolioCalculatorTab({
               cambio, nunca un fondo real en euros. Todas las filas están recortadas al período {calc.years[0]}–{calc.years[calc.years.length - 1]}.
             </p>
           </div>
+
+          <FullMetricsCard cols={calc[metricsCcy].fullMetrics} ccy={metricsCcy} setCcy={setMetricsCcy} />
 
           {calc.benchmarkNames.length > 0 && (
             <div style={ui.card}>

@@ -41,7 +41,7 @@ const TABS = [
     name: "Calculadora",
     badge: "neutral",
     text:
-      "Combina los resultados YA corridos en las pestañas anteriores con el % que le asignes a cada una, con rebalanceo anual. Siempre muestra USD y EUR por separado (convierte por tipo de cambio la que corrió en una sola moneda), grafica cierres semanales en un solo gráfico con selector USD | EUR, superpone S&P 500 y MSCI World, y calcula Sharpe, correlación e Information Ratio contra ambos. Volatilidad, drawdown y esas métricas se miden sobre cierres semanales (viernes), no sobre retornos anuales.",
+      "Combina los resultados YA corridos en las pestañas anteriores con el % que le asignes a cada una, con rebalanceo anual. Siempre muestra USD y EUR por separado (convierte por tipo de cambio la que corrió en una sola moneda), grafica cierres semanales en un solo gráfico con selector USD | EUR, superpone S&P 500 y MSCI World, y calcula Sharpe, correlación e Information Ratio contra ambos. Volatilidad, drawdown y esas métricas se miden sobre cierres semanales (viernes), no sobre retornos anuales. Una tabla de métricas completas da, para la cartera, cada pata y los benchmarks: mejor y peor año, mejor y peor semana, peor caída con fechas y recuperación, VaR/CVaR, Sortino, Calmar, beta y capturas alcista/bajista.",
   },
 ];
 
