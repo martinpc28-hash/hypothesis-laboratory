@@ -110,11 +110,12 @@ export default function InfoTab() {
   return (
     <div>
       <div style={ui.card}>
-        <h2 style={ui.cardTitle}>Hypothesis Laboratory</h2>
+        <h2 style={ui.cardTitle}>Contraste</h2>
         <p style={{ ...ui.cardSubtitle, fontSize: 14, marginBottom: 8 }}>
           Un laboratorio para probar hipótesis de trading sistemático contra datos históricos reales — no backtests
           de caja negra: cada número (retorno, drawdown, operación) es auditable hasta la fecha y el precio exacto
-          que lo produjo.
+          que lo produjo. El nombre viene del «contraste de hipótesis» estadístico, y también de contrastar cada
+          estrategia contra el S&amp;P 500, el MSCI World y la realidad en euros.
         </p>
         <p style={ui.cardSubtitle}>
           Empezó como un motor de <strong>revaluación completa</strong> de carteras (VaR repreciando cada instrumento
@@ -230,7 +231,7 @@ export default function InfoTab() {
       <div style={ui.card}>
         <h3 style={ui.cardTitle}>Repositorio</h3>
         <p style={{ ...ui.muted, margin: 0 }}>
-          github.com/martinpc28-hash/hypothesis-laboratory — rama <code>master</code>
+          github.com/martinpc28-hash/contraste — rama <code>master</code>
         </p>
       </div>
     </div>
