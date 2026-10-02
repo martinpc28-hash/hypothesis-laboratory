@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api.js";
 import { ui, colors } from "../theme.js";
 import LineChart from "../LineChart.jsx";
-import { computeMetrics } from "../portfolioMetrics.js";
+import { computeMetrics, pearson } from "../portfolioMetrics.js";
 
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -356,7 +356,7 @@ function num2(v) {
 }
 const tone = (v) => (v === undefined || v === null ? undefined : v >= 0 ? colors.success : colors.danger);
 
-const METRIC_ROWS = [
+const BASE_ROWS = [
   { section: "Retorno" },
   { label: "Retorno total", f: (m) => pct(m.totalReturn), t: (m) => tone(m.totalReturn) },
   { label: "CAGR", f: (m) => pct(m.cagr), t: (m) => tone(m.cagr) },
@@ -383,102 +383,227 @@ const METRIC_ROWS = [
   { label: "Sharpe (CAGR ÷ vol.)", f: (m) => num2(m.sharpe) },
   { label: "Sortino (CAGR ÷ desv. a la baja)", f: (m) => num2(m.sortino) },
   { label: "Calmar (CAGR ÷ peor caída)", f: (m) => num2(m.calmar) },
-  { section: "Frente al S&P 500 (semanal)" },
-  { label: "Beta", f: (m) => num2(m.beta) },
-  { label: "Captura alcista", f: (m) => pct(m.upCapture, 0) },
-  { label: "Captura bajista", f: (m) => pct(m.downCapture, 0) },
 ];
 
-function FullMetricsCard({ cols, ccy, setCcy }) {
-  if (!cols) return null;
-  const hasWeekly = cols.some((c) => c.m.weeks);
-  const shortName = (n) => (n.length > 26 ? n.slice(0, 24) + "…" : n);
+function relRows(name) {
+  const get = (m) => m.rel?.find((r) => r.name === name);
+  return [
+    { section: `Frente a ${name} (semanal)` },
+    { label: "Beta", f: (m) => num2(get(m)?.beta) },
+    { label: "Correlación", f: (m) => num2(get(m)?.correlation) },
+    { label: "Information Ratio", f: (m) => num2(get(m)?.informationRatio) },
+    { label: "Tracking error", f: (m) => pct(get(m)?.trackingError) },
+    { label: "Captura alcista", f: (m) => pct(get(m)?.upCapture, 0) },
+    { label: "Captura bajista", f: (m) => pct(get(m)?.downCapture, 0) },
+  ];
+}
+
+function CcyToggle({ ccy, setCcy }) {
   return (
-    <div style={ui.card}>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <div>
-          <div style={ui.eyebrow}>Tabla 02</div>
-          <h3 style={{ ...ui.cardTitle, marginTop: 6 }}>Métricas completas</h3>
-        </div>
-        <div
-          role="group"
-          aria-label="Moneda de las métricas"
-          style={{ display: "flex", padding: 3, borderRadius: 10, background: colors.surfaceAlt, border: `1px solid ${colors.border}` }}
+    <div
+      role="group"
+      aria-label="Moneda de las métricas"
+      style={{ display: "flex", padding: 3, borderRadius: 10, background: colors.surfaceAlt, border: `1px solid ${colors.border}` }}
+    >
+      {["usd", "eur"].map((c) => (
+        <button
+          key={c}
+          type="button"
+          aria-pressed={ccy === c}
+          onClick={() => setCcy(c)}
+          style={{
+            height: 34,
+            padding: "0 18px",
+            borderRadius: 8,
+            border: "none",
+            fontFamily: "inherit",
+            fontSize: 13,
+            fontWeight: 700,
+            cursor: "pointer",
+            background: ccy === c ? colors.primary : "transparent",
+            color: ccy === c ? "#0B0C10" : colors.textMuted,
+          }}
         >
-          {["usd", "eur"].map((c) => (
-            <button
-              key={c}
-              type="button"
-              aria-pressed={ccy === c}
-              onClick={() => setCcy(c)}
-              style={{
-                height: 34,
-                padding: "0 18px",
-                borderRadius: 8,
-                border: "none",
-                fontFamily: "inherit",
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: "pointer",
-                background: ccy === c ? colors.primary : "transparent",
-                color: ccy === c ? "#0B0C10" : colors.textMuted,
-              }}
-            >
-              {c.toUpperCase()}
-            </button>
+          {c.toUpperCase()}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function FullMetricsCard({ data, ccy, setCcy }) {
+  const [showLegs, setShowLegs] = useState(false);
+  if (!data) return null;
+  const { cols, yearly, legCorr, benchNames, legNames } = data;
+  const port = cols[0].m;
+  const hasWeekly = !!port.weeks;
+  const shown = cols.filter((c) => c.kind !== "leg" || showLegs);
+  const rows = [...BASE_ROWS, ...benchNames.flatMap(relRows)];
+  const shortName = (n) => (n.length > 26 ? n.slice(0, 24) + "…" : n);
+  const refName = benchNames[0];
+  const tiles = [
+    { label: "CAGR", v: pct(port.cagr), c: tone(port.cagr) },
+    { label: "Volatilidad", v: pct(port.volatility) },
+    { label: "Peor caída", v: pct(port.maxDrawdown), c: colors.danger },
+    { label: "Sharpe", v: num2(port.sharpe) },
+    { label: "Sortino", v: num2(port.sortino) },
+    { label: "Calmar", v: num2(port.calmar) },
+    { label: "Mejor año", v: port.bestYear ? pct(port.bestYear.value) : "—", c: colors.success, sub: port.bestYear?.year },
+    { label: "Peor año", v: port.worstYear ? pct(port.worstYear.value) : "—", c: tone(port.worstYear?.value), sub: port.worstYear?.year },
+  ];
+  const cell = (v) => (v === undefined || v === null ? "—" : pct(v));
+
+  return (
+    <>
+      <div style={ui.card}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={ui.eyebrow}>Tu cartera</div>
+            <h3 style={{ ...ui.cardTitle, marginTop: 6 }}>Métricas de la cartera combinada</h3>
+          </div>
+          <CcyToggle ccy={ccy} setCcy={setCcy} />
+        </div>
+        <div style={{ ...ui.statGrid, marginTop: 14 }}>
+          {tiles.map((t) => (
+            <div key={t.label} style={{ ...ui.statCard, padding: "14px 16px" }}>
+              <div style={ui.statLabel}>{t.label}</div>
+              <div style={{ ...ui.statValue, fontSize: 24, color: t.c }}>{t.v}</div>
+              {t.sub !== undefined && <div style={{ ...ui.muted, marginTop: 4 }}>{t.sub}</div>}
+            </div>
           ))}
         </div>
+        {ccy === "eur" && <p style={{ ...ui.muted, marginTop: 10 }}>En EUR es una aproximación (ver nota arriba).</p>}
       </div>
-      <p style={{ ...ui.cardSubtitle, marginTop: 8 }}>
-        Mejor y peor año son años calendario de la mezcla anual. Semanas, caídas, VaR, Sortino, beta y capturas salen de
-        los cierres de viernes.{" "}
-        {hasWeekly ? "" : "No hay datos semanales suficientes: solo se muestran las cifras anuales. "}
-        VaR 95%: la semana que se supera solo 1 de cada 20 veces; CVaR: el promedio de las semanas peores que esa.
-        Captura alcista / bajista: cuánto del movimiento del S&amp;P 500 captura en las semanas en que sube / baja
-        (bajista menor a 100% es bueno).
-        {ccy === "eur" && " En EUR es una aproximación (ver nota arriba)."}
-      </p>
-      <div style={ui.tableScroll}>
-        <table className="num-right" style={ui.table}>
-          <thead>
-            <tr>
-              <th style={ui.th}>Métrica</th>
-              {cols.map((c, i) => (
-                <th key={i} style={{ ...ui.th, whiteSpace: "normal", minWidth: 120, color: c.kind === "portfolio" ? colors.text : undefined }} title={c.name}>
-                  {shortName(c.name)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {METRIC_ROWS.map((r, ri) =>
-              r.section ? (
-                <tr key={ri}>
-                  <td
-                    colSpan={cols.length + 1}
-                    style={{ ...ui.td, ...ui.eyebrow, fontSize: 11, paddingTop: 14, textAlign: "left" }}
-                  >
-                    {r.section}
-                  </td>
-                </tr>
-              ) : (
-                <tr key={ri}>
-                  <td style={ui.td}>{r.label}</td>
-                  {cols.map((c, ci) => (
-                    <td
-                      key={ci}
-                      style={{ ...ui.td, color: r.t ? r.t(c.m) : undefined, fontWeight: c.kind === "portfolio" ? 700 : 400 }}
-                    >
-                      {r.f(c.m)}
+
+      <div style={ui.card}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={ui.eyebrow}>Tabla 02</div>
+            <h3 style={{ ...ui.cardTitle, marginTop: 6 }}>Cartera contra los benchmarks</h3>
+          </div>
+          {legNames.length > 0 && (
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: colors.textMuted, minHeight: 44 }}>
+              <input type="checkbox" checked={showLegs} onChange={(e) => setShowLegs(e.target.checked)} />
+              Mostrar cada estrategia
+            </label>
+          )}
+        </div>
+        <p style={{ ...ui.cardSubtitle, marginTop: 8 }}>
+          Mejor y peor año son años calendario de la mezcla anual. Semanas, caídas, VaR, Sortino y todo lo relativo a un
+          benchmark salen de los cierres de viernes.{" "}
+          {hasWeekly ? "" : "No hay datos semanales suficientes: solo se muestran las cifras anuales. "}
+          VaR 95%: la semana que se supera solo 1 de cada 20 veces; CVaR: el promedio de las semanas peores que esa.
+          Captura alcista / bajista: cuánto del movimiento del benchmark captura la cartera en las semanas en que sube /
+          baja (bajista menor a 100% es bueno). Tracking error: volatilidad de la diferencia contra el benchmark;
+          Information Ratio: exceso anualizado ÷ tracking error.
+        </p>
+        <div style={ui.tableScroll}>
+          <table className="num-right" style={ui.table}>
+            <thead>
+              <tr>
+                <th style={ui.th}>Métrica</th>
+                {shown.map((c, i) => (
+                  <th key={i} style={{ ...ui.th, whiteSpace: "normal", minWidth: 120, color: c.kind === "portfolio" ? colors.text : undefined }} title={c.name}>
+                    {shortName(c.name)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, ri) =>
+                r.section ? (
+                  <tr key={ri}>
+                    <td colSpan={shown.length + 1} style={{ ...ui.td, ...ui.eyebrow, fontSize: 11, paddingTop: 14, textAlign: "left" }}>
+                      {r.section}
                     </td>
-                  ))}
-                </tr>
-              )
-            )}
-          </tbody>
-        </table>
+                  </tr>
+                ) : (
+                  <tr key={ri}>
+                    <td style={ui.td}>{r.label}</td>
+                    {shown.map((c, ci) => (
+                      <td key={ci} style={{ ...ui.td, color: r.t ? r.t(c.m) : undefined, fontWeight: c.kind === "portfolio" ? 700 : 400 }}>
+                        {r.f(c.m)}
+                      </td>
+                    ))}
+                  </tr>
+                )
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
+
+      <div style={ui.card}>
+        <div style={ui.eyebrow}>Tabla 03</div>
+        <h3 style={{ ...ui.cardTitle, margin: "6px 0 12px" }}>Retorno año por año</h3>
+        <div style={ui.tableScroll}>
+          <table className="num-right" style={ui.table}>
+            <thead>
+              <tr>
+                <th style={ui.th}>Año</th>
+                <th style={{ ...ui.th, color: colors.text }}>Cartera</th>
+                {showLegs && legNames.map((n, i) => <th key={`l${i}`} style={ui.th} title={n}>{shortName(n)}</th>)}
+                {benchNames.map((n, i) => <th key={`b${i}`} style={ui.th}>{n}</th>)}
+                {refName && <th style={ui.th}>Exceso vs {refName}</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {yearly.map((y) => {
+                const excess = refName && y.benchmarks[0] !== undefined ? y.portfolio - y.benchmarks[0] : undefined;
+                return (
+                  <tr key={y.year}>
+                    <td style={ui.td}>{y.year}</td>
+                    <td style={{ ...ui.td, color: tone(y.portfolio), fontWeight: 700 }}>{cell(y.portfolio)}</td>
+                    {showLegs && y.legs.map((v, i) => <td key={`l${i}`} style={{ ...ui.td, color: tone(v) }}>{cell(v)}</td>)}
+                    {y.benchmarks.map((v, i) => <td key={`b${i}`} style={{ ...ui.td, color: tone(v) }}>{cell(v)}</td>)}
+                    {refName && <td style={{ ...ui.td, color: tone(excess) }}>{excess === undefined ? "—" : `${excess >= 0 ? "+" : ""}${(excess * 100).toFixed(1)} pp`}</td>}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {refName && (
+          <p style={{ ...ui.muted, marginTop: 8 }}>
+            La cartera superó a {refName} en {yearly.filter((y) => y.benchmarks[0] !== undefined && y.portfolio > y.benchmarks[0]).length} de{" "}
+            {yearly.filter((y) => y.benchmarks[0] !== undefined).length} años.
+          </p>
+        )}
+      </div>
+
+      {legCorr && (
+        <div style={ui.card}>
+          <div style={ui.eyebrow}>Tabla 04</div>
+          <h3 style={{ ...ui.cardTitle, margin: "6px 0 8px" }}>Diversificación: correlación entre estrategias</h3>
+          <p style={ui.cardSubtitle}>
+            Correlación de los retornos semanales. Cuanto más cerca de 0 (o negativa), más se compensan entre sí; cerca
+            de 1, se mueven juntas y la mezcla diversifica poco.
+          </p>
+          <div style={ui.tableScroll}>
+            <table className="num-right" style={ui.table}>
+              <thead>
+                <tr>
+                  <th style={ui.th}></th>
+                  {legCorr.names.map((n, i) => <th key={i} style={ui.th} title={n}>{shortName(n)}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {legCorr.matrix.map((row, i) => (
+                  <tr key={i}>
+                    <td style={ui.td}>{shortName(legCorr.names[i])}</td>
+                    {row.map((v, j) => (
+                      <td key={j} style={{ ...ui.td, color: i === j ? colors.textMuted : v > 0.7 ? colors.warning : undefined }}>
+                        {num2(v)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -859,13 +984,14 @@ export default function PortfolioCalculatorTab({
   function buildFullMetrics(side, normalized, benchmarks, sortedYears, returnsKey) {
     const pts = side.weeklyPoints;
     const levels = (key) => (pts ? pts.map((p) => [p.date, 1 + (p[key] ?? 0)]) : null);
-    const spIdx = benchmarks.findIndex((b) => b.name === "S&P 500");
-    const spWeekly = pts && spIdx >= 0 ? weeklyReturnsOf(pts, `cumulativeBenchmark${spIdx}`) : null;
+    const refs = pts
+      ? benchmarks.map((b, bi) => ({ name: b.name, weekly: weeklyReturnsOf(pts, `cumulativeBenchmark${bi}`) }))
+      : [];
     const cols = [
       {
         name: "Cartera combinada",
         kind: "portfolio",
-        m: computeMetrics({ years: sortedYears, annual: side.blendedReturns, weekly: levels("cumulativePortfolio"), benchWeekly: spWeekly }),
+        m: computeMetrics({ years: sortedYears, annual: side.blendedReturns, weekly: levels("cumulativePortfolio"), refs }),
       },
     ];
     normalized.forEach((l, i) => {
@@ -876,7 +1002,7 @@ export default function PortfolioCalculatorTab({
           years: sortedYears,
           annual: sortedYears.map((y) => l[returnsKey].get(y) ?? 0),
           weekly: levels(`cumulativeLeg${i}`),
-          benchWeekly: spWeekly,
+          refs,
         }),
       });
     });
@@ -889,11 +1015,27 @@ export default function PortfolioCalculatorTab({
           years: yrs,
           annual: yrs.map((y) => b[returnsKey].get(y)),
           weekly: levels(`cumulativeBenchmark${bi}`),
-          benchWeekly: null,
+          refs: [],
         }),
       });
     });
-    return cols;
+
+    const yearly = sortedYears.map((y, i) => ({
+      year: y,
+      portfolio: side.blendedReturns[i],
+      legs: normalized.map((l) => l[returnsKey].get(y)),
+      benchmarks: benchmarks.map((b) => b[returnsKey].get(y)),
+    }));
+
+    let legCorr = null;
+    if (pts && normalized.length >= 2) {
+      const series = normalized.map((_, i) => weeklyReturnsOf(pts, `cumulativeLeg${i}`));
+      legCorr = {
+        names: normalized.map((l) => l.name),
+        matrix: series.map((a) => series.map((b) => pearson(a, b))),
+      };
+    }
+    return { cols, yearly, legCorr, benchNames: benchmarks.map((b) => b.name), legNames: normalized.map((l) => l.name) };
   }
 
   // Swaps volatility / max drawdown / correlation / IR for their weekly-close versions on one
@@ -1320,86 +1462,7 @@ export default function PortfolioCalculatorTab({
             </p>
           </div>
 
-          <FullMetricsCard cols={calc[metricsCcy].fullMetrics} ccy={metricsCcy} setCcy={setMetricsCcy} />
-
-          {calc.benchmarkNames.length > 0 && (
-            <div style={ui.card}>
-              <h3 style={ui.cardTitle}>Métricas vs. benchmarks</h3>
-              <p style={ui.cardSubtitle}>
-                Sharpe acá es CAGR ÷ volatilidad (sin restar una tasa libre de riesgo — mismo criterio que ya usa
-                Credit Rotation para "ajustado por riesgo"). Con cierres semanales, la volatilidad, la
-                correlación y el Information Ratio se calculan sobre retornos de viernes a viernes (IR anualizado con
-                √52); sin datos semanales suficientes, sobre retornos anuales, que son estimaciones más ruidosas.
-              </p>
-              <div style={ui.tableScroll}>
-                <table className="num-right" style={ui.table}>
-                  <thead>
-                    <tr>
-                      <th style={ui.th}></th>
-                      <th style={ui.th} colSpan={2}>
-                        USD
-                      </th>
-                      <th style={{ ...ui.th, borderLeft: `1px solid ${colors.border}` }} colSpan={2}>
-                        EUR
-                      </th>
-                    </tr>
-                    <tr>
-                      <th style={ui.th}></th>
-                      <th style={ui.th}>Cartera combinada</th>
-                      <th style={ui.th}></th>
-                      <th style={{ ...ui.th, borderLeft: `1px solid ${colors.border}` }}>Cartera combinada</th>
-                      <th style={ui.th}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td style={{ ...ui.td, fontWeight: 700 }}>Sharpe (CAGR ÷ Vol.)</td>
-                      <td style={ui.td} colSpan={2}>
-                        {calc.sharpeUsd === null ? "—" : calc.sharpeUsd.toFixed(2)}
-                      </td>
-                      <td style={{ ...ui.td, borderLeft: `1px solid ${colors.border}` }} colSpan={2}>
-                        {calc.sharpeEur === null ? "—" : calc.sharpeEur.toFixed(2)}
-                      </td>
-                    </tr>
-                    {calc.benchmarkMetricsUsd.map((mu, i) => {
-                      const me = calc.benchmarkMetricsEur[i];
-                      return (
-                        <tr key={i}>
-                          <td style={ui.td}>vs. {mu.name}</td>
-                          <td style={ui.td}>
-                            Correlación: <strong>{mu.correlation === null ? "—" : mu.correlation.toFixed(2)}</strong>
-                          </td>
-                          <td style={ui.td}>
-                            IR: <strong>{mu.informationRatio === null ? "—" : mu.informationRatio.toFixed(2)}</strong>
-                          </td>
-                          <td style={{ ...ui.td, borderLeft: `1px solid ${colors.border}` }}>
-                            Correlación: <strong>{me.correlation === null ? "—" : me.correlation.toFixed(2)}</strong>
-                          </td>
-                          <td style={ui.td}>
-                            IR: <strong>{me.informationRatio === null ? "—" : me.informationRatio.toFixed(2)}</strong>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {calc.benchmarkMetricsUsd.map((mu, i) => {
-                      const me = calc.benchmarkMetricsEur[i];
-                      return (
-                        <tr key={`stats-${i}`}>
-                          <td style={{ ...ui.td, color: colors.textMuted }}>{mu.name} — CAGR / Vol. propios</td>
-                          <td style={ui.td} colSpan={2}>
-                            {pct(mu.stats.cagr)} / {pct(mu.stats.volatility)}
-                          </td>
-                          <td style={{ ...ui.td, borderLeft: `1px solid ${colors.border}` }} colSpan={2}>
-                            {pct(me.stats.cagr)} / {pct(me.stats.volatility)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+          <FullMetricsCard data={calc[metricsCcy].fullMetrics} ccy={metricsCcy} setCcy={setMetricsCcy} />
         </>
       )}
     </div>

@@ -24,8 +24,8 @@ function stdev(xs) {
 }
 
 // years: ascending calendar years; annual: matching returns; weekly: [[date, wealthLevel]] ascending
-// or null; benchWeekly: the reference's week-to-week returns on the SAME grid, or null.
-export function computeMetrics({ years, annual, weekly, benchWeekly }) {
+// or null; refs: [{name, weekly}] with each reference's week-to-week returns on the SAME grid.
+export function computeMetrics({ years, annual, weekly, refs }) {
   const m = {};
 
   if (annual.length) {
@@ -105,22 +105,46 @@ export function computeMetrics({ years, annual, weekly, benchWeekly }) {
     if (maxDD < 0) m.calmar = m.cagr / Math.abs(maxDD);
   }
 
-  if (benchWeekly && benchWeekly.length === rets.length) {
-    const mb = mean(benchWeekly), mr = mean(rets);
+  m.rel = [];
+  for (const ref of refs || []) {
+    const bw = ref.weekly;
+    if (!bw || bw.length !== rets.length) continue;
+    const mb = mean(bw), mr = mean(rets);
     let cov = 0, vb = 0;
     for (let i = 0; i < rets.length; i++) {
-      cov += (rets[i] - mr) * (benchWeekly[i] - mb);
-      vb += (benchWeekly[i] - mb) ** 2;
+      cov += (rets[i] - mr) * (bw[i] - mb);
+      vb += (bw[i] - mb) ** 2;
     }
-    if (vb) m.beta = cov / vb;
+    const r = { name: ref.name, correlation: pearson(rets, bw) };
+    if (vb) r.beta = cov / vb;
+    const excess = rets.map((x, i) => x - bw[i]);
+    const sdx = stdev(excess);
+    if (sdx) {
+      r.trackingError = sdx * Math.sqrt(WEEKS_PER_YEAR);
+      r.informationRatio = (mean(excess) / sdx) * Math.sqrt(WEEKS_PER_YEAR);
+    }
     const up = [], down = [];
-    benchWeekly.forEach((b, i) => (b > 0 ? up : down).push(i));
+    bw.forEach((x, i) => (x > 0 ? up : down).push(i));
     const ratio = (idx) => {
-      const b = mean(idx.map((i) => benchWeekly[i]));
-      return b ? mean(idx.map((i) => rets[i])) / b : null;
+      const x = mean(idx.map((i) => bw[i]));
+      return x ? mean(idx.map((i) => rets[i])) / x : null;
     };
-    if (up.length) m.upCapture = ratio(up);
-    if (down.length) m.downCapture = ratio(down);
+    if (up.length) r.upCapture = ratio(up);
+    if (down.length) r.downCapture = ratio(down);
+    m.rel.push(r);
   }
   return m;
+}
+
+export function pearson(xs, ys) {
+  const n = Math.min(xs.length, ys.length);
+  if (n < 2) return null;
+  const mx = mean(xs.slice(0, n)), my = mean(ys.slice(0, n));
+  let cov = 0, vx = 0, vy = 0;
+  for (let i = 0; i < n; i++) {
+    cov += (xs[i] - mx) * (ys[i] - my);
+    vx += (xs[i] - mx) ** 2;
+    vy += (ys[i] - my) ** 2;
+  }
+  return vx && vy ? cov / Math.sqrt(vx * vy) : null;
 }
