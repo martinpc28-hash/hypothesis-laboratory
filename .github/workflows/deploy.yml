@@ -1,0 +1,91 @@
+name: Deploy
+
+# Cada push a master compila el frontend y el backend y reinicia el servicio en EC2.
+# Sin llaves guardadas: GitHub le pide a AWS credenciales temporales (OIDC) para el rol
+# hypothesis-lab-github-deploy, que solo puede subir el jar y lanzar un comando SSM.
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - "README.md"
+      - "analysis/**"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  BUCKET: full-revaluation-deploy-909011175236
+  INSTANCE_ID: i-096e6151337683867
+  JAR: full-revaluation-0.1.0.jar
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Copy frontend into the jar's static resources
+        run: |
+          rm -rf src/main/resources/static
+          mkdir -p src/main/resources/static
+          cp -r frontend/dist/. src/main/resources/static/
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+
+      - name: Build jar
+        run: mvn -B -q -DskipTests package
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload jar
+        run: aws s3 cp "target/${JAR}" "s3://${BUCKET}/${JAR}"
+
+      - name: Restart the service on EC2
+        run: |
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --parameters "commands=[\"systemctl stop fullreval\",\"aws s3 cp s3://${BUCKET}/${JAR} /opt/app/app.jar\",\"systemctl start fullreval\",\"sleep 5\",\"systemctl is-active fullreval\"]" \
+            --query Command.CommandId --output text)
+          echo "SSM command: $CMD_ID"
+          aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$INSTANCE_ID"
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" \
+            --query '{status:Status,out:StandardOutputContent}' --output text | tail -c 200
+
+      - name: Check the app answers
+        run: |
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${{ vars.APP_URL }}/" || true)
+            echo "attempt $i -> HTTP $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 10
+          done
+          echo "The app did not return 200 after the deploy" >&2
+          exit 1
