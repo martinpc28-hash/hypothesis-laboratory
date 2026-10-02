@@ -42,7 +42,7 @@ const TABS = [
 const STACK = [
   { layer: "Backend", tech: "Java 17, Spring Boot 3, Maven" },
   { layer: "Frontend", tech: "React 18 + Vite — gráficos SVG hechos a mano (sin librería de charting), servidos como recursos estáticos del mismo jar de Spring Boot (un solo proceso, mismo origen, sin CORS). Diseño responsive: se usa también en celular (objetivos táctiles de 44px, gráficos que se adaptan al ancho). Tipografías Manrope + IBM Plex Mono" },
-  { layer: "Persistencia", tech: "PostgreSQL (Amazon RDS) vía Hibernate — solo para el motor de revaluación (Dashboard/Carteras/Escenarios, oculto del nav hoy). Las 4 pestañas activas son stateless: se recalculan en cada corrida a partir de las fuentes de datos, sin guardar nada en base" },
+  { layer: "Persistencia", tech: "Las pestañas no guardan nada: se recalculan en cada corrida a partir de las fuentes de datos. La base (PostgreSQL en RDS) solo la usa código heredado de una versión anterior" },
   { layer: "Cómputo", tech: "Una instancia EC2, desplegada vía S3 + SSM Run Command (sin SSH, sin puerto 22 abierto)" },
 ];
 
@@ -57,10 +57,7 @@ const BACKEND_TREE = `src/main/java/com/martin/fullreval/
 │   ├── SeasonalityController.java      /api/seasonality/*
 │   ├── VixTimingController.java        /api/vix-timing/*
 │   ├── CreditRotationController.java   /api/credit-rotation/*
-│   ├── FxController.java               /api/fx/*  (tipo de cambio para la Calculadora)
-│   ├── PortfolioController.java        /api/portfolios/*        \\_ motor de
-│   ├── ScenarioController.java         /api/scenarios/*         /  revaluación
-│   └── RevaluationController.java      /api/revaluation/*      /   (oculto)
+│   └── FxController.java               /api/fx/*  (tipo de cambio para la Calculadora)
 ├── service/
 │   ├── SeasonalityService.java     motor de la estrategia de estacionalidad
 │   ├── VixTimingService.java       motor de rotación S&P 500 / cash
@@ -69,33 +66,24 @@ const BACKEND_TREE = `src/main/java/com/martin/fullreval/
 │   ├── YahooFinanceService.java    cliente de precios (crudo + ajustado)
 │   ├── FredClient.java             cliente de series FRED
 │   ├── EodhdClient.java            cliente del dataset EUFUND
-│   ├── RevaluationService.java     \\
-│   ├── HistoricalScenarioService   |  motor de revaluación original
-│   ├── MacroDataService.java       |  (VaR por reprecio completo,
-│   └── pricing/BlackScholesPricer  /  oculto del nav)
-├── model/       Bond, EuropeanOption, Equity, MarketScenario, RevaluationResult
-├── repository/  Spring Data JPA (solo para el motor de revaluación)
-└── dto/         un request/response por endpoint`;
+│   └── MacroDataService.java       series macro compartidas
+├── dto/         un request por endpoint
+└── (código heredado de una versión anterior, sin uso en la UI: model/, repository/, pricing/)`;
 
 const FRONTEND_TREE = `frontend/src/
 ├── App.jsx              shell: header, selector de cartera, barra de pestañas
 ├── api.js               TODAS las llamadas al backend, en un solo lugar
 ├── theme.js             tokens de diseño (colores, tipografías, ui.*)
-├── LineChart.jsx         \\
-├── ScatterChart.jsx       |  gráficos SVG propios — sin librería,
-├── HeatmapGrid.jsx        |  leyenda clickeable (oculta/muestra series),
-├── AuditPanel.jsx         |  se adaptan al ancho (celular), eje X año o fecha
-├── InstrumentBarChart.jsx |
-├── PnlHistogram.jsx      /
+├── LineChart.jsx        \\
+├── ScatterChart.jsx      |  gráficos SVG propios, sin librería:
+├── HeatmapGrid.jsx       |  leyenda clickeable (oculta/muestra series),
+├── AuditPanel.jsx       /  se adaptan al ancho (celular), eje X año o fecha
 └── tabs/
     ├── InfoTab.jsx               esta página
     ├── SeasonalityTab.jsx
     ├── VixTimingTab.jsx
     ├── CreditRotationTab.jsx
-    ├── PortfolioCalculatorTab.jsx
-    ├── DashboardTab.jsx          \\  motor de revaluación original
-    ├── PortfoliosTab.jsx          |  (oculto del nav, código intacto)
-    └── ScenariosTab.jsx          /`;
+    └── PortfolioCalculatorTab.jsx`;
 
 function Row({ left, right }) {
   return (
@@ -117,11 +105,8 @@ export default function InfoTab() {
           que lo produjo.
         </p>
         <p style={ui.cardSubtitle}>
-          Empezó como un motor de <strong>revaluación completa</strong> de carteras (VaR repreciando cada instrumento
-          bajo cada escenario, sin aproximación delta/gamma) y creció hacia tres estrategias sistemáticas
-          independientes — estacionalidad, market timing con VIX, y rotación de crédito — más una calculadora que
-          las combina. El motor original sigue andando (endpoints y código intactos) pero está oculto de la barra de
-          pestañas; hoy la app muestra las 4 pestañas de abajo.
+          Tres estrategias sistemáticas independientes — estacionalidad, market timing con VIX y rotación de crédito — y
+          una calculadora que las combina. Hoy la app muestra las cuatro pestañas de abajo.
         </p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <span style={ui.badge("neutral")}>Java 17 · Spring Boot 3</span>
