@@ -124,12 +124,13 @@ function informationRatio(portfolioReturns, benchmarkReturns) {
 
 // Legs and benchmarks never share a hue: S&P 500 used to be the same amber as VIX Timing, which
 // made the chart ambiguous. Legs are solid lines, benchmarks are dashed grey/amber.
-const LEG_COLORS = [colors.primary, "#B48CFF", colors.success, "#F472B6"];
+const LEG_COLORS = [colors.primary, "#B48CFF", colors.success, "#F472B6", "#2DD4BF"];
 // Colour follows the strategy, not its position, so a leg keeps its colour whether or not the others are included.
 function legColor(name) {
   if (name.startsWith("Seasonality")) return LEG_COLORS[0];
   if (name.startsWith("VIX")) return LEG_COLORS[1];
   if (name.startsWith("Credit")) return LEG_COLORS[2];
+  if (name.startsWith("Small")) return LEG_COLORS[4];
   return LEG_COLORS[3];
 }
 const BENCHMARK_COLORS = [colors.warning, colors.textMuted];
@@ -303,12 +304,14 @@ export default function PortfolioCalculatorTab({
   vixTimingResult,
   creditRotationResult,
   illiquidsResult,
+  smallCapsResult,
 }) {
   const seasonalityAvailable = !!seasonalityTestResult?.strategy?.cumulative;
   const seasonalityMacroAvailable = !!seasonalityMacroResult?.macroFilteredStrategy?.cumulative;
   const vixAvailable = !!vixTimingResult?.cumulative;
   const creditAvailable = !!creditRotationResult?.cumulative;
   const illiquidsAvailable = !!illiquidsResult?.cumulative;
+  const smallCapsAvailable = !!smallCapsResult?.cumulative;
 
   const [seasonalityIncluded, setSeasonalityIncluded] = useState(true);
   const [seasonalityWeight, setSeasonalityWeight] = useState(34);
@@ -322,6 +325,9 @@ export default function PortfolioCalculatorTab({
 
   const [illiquidsIncluded, setIlliquidsIncluded] = useState(true);
   const [illiquidsWeight, setIlliquidsWeight] = useState(33);
+
+  const [smallCapsIncluded, setSmallCapsIncluded] = useState(true);
+  const [smallCapsWeight, setSmallCapsWeight] = useState(33);
 
   const [yearFrom, setYearFrom] = useState("");
   const [yearTo, setYearTo] = useState("");
@@ -351,7 +357,8 @@ export default function PortfolioCalculatorTab({
     (seasonalityIncluded ? Number(seasonalityWeight) || 0 : 0) +
     (vixIncluded ? Number(vixWeight) || 0 : 0) +
     (creditIncluded && creditAvailable ? Number(creditWeight) || 0 : 0) +
-    (illiquidsIncluded && illiquidsAvailable ? Number(illiquidsWeight) || 0 : 0);
+    (illiquidsIncluded && illiquidsAvailable ? Number(illiquidsWeight) || 0 : 0) +
+    (smallCapsIncluded && smallCapsAvailable ? Number(smallCapsWeight) || 0 : 0);
 
   // Wraps a USD/EUR pair of return maps + real stats into one leg entry — shared by both
   // single-currency sources (Seasonality, VIX Timing) after FX-converting the missing side. Also
@@ -417,6 +424,18 @@ export default function PortfolioCalculatorTab({
       benchmarks.push({
         name: "S&P 500",
         ...toDualCurrency(yearlyReturnMap(illiquidsResult.cumulative, "cumulativeSp500"), nativeCurrency, fxRates),
+        weeklyUsdEntries: nativeCurrency === "USD" ? weeklyNative : weeklyConverted,
+        weeklyEurEntries: nativeCurrency === "EUR" ? weeklyNative : weeklyConverted,
+      });
+    }
+
+    if (!benchmarks.some((b) => b.name === "S&P 500") && smallCapsIncluded && smallCapsAvailable) {
+      const nativeCurrency = smallCapsResult?.meta?.currency || "USD";
+      const weeklyNative = weeklyWealthEntries(smallCapsResult.weekly, "cumulativeSp500");
+      const weeklyConverted = convertWeeklyEntries(weeklyNative, nativeCurrency, fxRates);
+      benchmarks.push({
+        name: "S&P 500",
+        ...toDualCurrency(yearlyReturnMap(smallCapsResult.cumulative, "cumulativeSp500"), nativeCurrency, fxRates),
         weeklyUsdEntries: nativeCurrency === "USD" ? weeklyNative : weeklyConverted,
         weeklyEurEntries: nativeCurrency === "EUR" ? weeklyNative : weeklyConverted,
       });
@@ -496,6 +515,19 @@ export default function PortfolioCalculatorTab({
           nativeReturns: yearlyReturnMap(illiquidsResult.cumulative, "cumulativeStrategy"),
           realStatsNative: illiquidsResult.stats?.strategy,
           weeklyNativeEntries: weeklyWealthEntries(illiquidsResult.weekly, "cumulativeStrategy"),
+        })
+      );
+    }
+    if (smallCapsIncluded && smallCapsAvailable) {
+      const nativeCurrency = smallCapsResult?.meta?.currency || "USD";
+      legs.push(
+        makeDualCurrencyLeg({
+          name: `Small Caps (${smallCapsResult.meta.assetLabel} / bonos AAA)`,
+          weight: Number(smallCapsWeight) || 0,
+          nativeCurrency,
+          nativeReturns: yearlyReturnMap(smallCapsResult.cumulative, "cumulativeStrategy"),
+          realStatsNative: smallCapsResult.stats?.strategy,
+          weeklyNativeEntries: weeklyWealthEntries(smallCapsResult.weekly, "cumulativeStrategy"),
         })
       );
     }
@@ -656,7 +688,7 @@ export default function PortfolioCalculatorTab({
       <div style={ui.card}>
         <h2 style={ui.cardTitle}>Calculadora de cartera combinada</h2>
         <p style={ui.cardSubtitle}>
-          Combina los resultados YA corridos en Seasonality, VIX Timing e Ilíquidos con el % que le asignes a
+          Combina los resultados YA corridos en Seasonality, VIX Timing, Small Caps e Ilíquidos con el % que le asignes a
           cada uno, y calcula qué rentabilidad hubiera dado la mezcla en el período en común — siempre en USD Y en
           EUR por separado, sea cual sea la estrategia elegida. Corré esas pestañas primero — esta calculadora no
           vuelve a pedir datos, solo mezcla lo que ya calculaste ahí. El rebalanceo es anual (a fin de cada año se
@@ -665,7 +697,7 @@ export default function PortfolioCalculatorTab({
           de fin de año puede no capturar una caída fuerte que se recuperó antes de diciembre.
         </p>
         <p style={ui.cardSubtitle}>
-          Seasonality, VIX Timing e Ilíquidos solo corren en UNA moneda a la vez (la que elegiste en su propia pestaña) — acá esa moneda se toma
+          Seasonality, VIX Timing, Small Caps e Ilíquidos solo corren en UNA moneda a la vez (la que elegiste en su propia pestaña) — acá esa moneda se toma
           como la real, y la otra se estima aplicando el tipo de cambio EUR/USD de fin de año a su retorno anual
           (misma fórmula que ya usa VIX Timing internamente para su propio modo EUR, aplicada una vez al año en vez
           de una vez al día).
@@ -746,6 +778,30 @@ export default function PortfolioCalculatorTab({
                 <td style={ui.td}>
                   <input
                     type="checkbox"
+                    checked={smallCapsIncluded}
+                    disabled={!smallCapsAvailable}
+                    onChange={(e) => setSmallCapsIncluded(e.target.checked)}
+                  />
+                </td>
+                <td style={ui.td}>
+                  Small Caps
+                  {!smallCapsAvailable && <div style={ui.muted}>Corré el backtest en Small Caps primero</div>}
+                </td>
+                <td style={ui.td}>{smallCapsAvailable ? smallCapsResult.meta.assetLabel + " / bonos AAA" : "—"}</td>
+                <td style={ui.td}>
+                  <input
+                    style={{ ...ui.input, width: 80 }}
+                    type="number"
+                    value={smallCapsWeight}
+                    disabled={!smallCapsIncluded || !smallCapsAvailable}
+                    onChange={(e) => setSmallCapsWeight(e.target.value)}
+                  />
+                </td>
+              </tr>
+              <tr>
+                <td style={ui.td}>
+                  <input
+                    type="checkbox"
                     checked={illiquidsIncluded}
                     disabled={!illiquidsAvailable}
                     onChange={(e) => setIlliquidsIncluded(e.target.checked)}
@@ -803,6 +859,7 @@ export default function PortfolioCalculatorTab({
             { on: vixIncluded && vixAvailable, w: Number(vixWeight) || 0, c: LEG_COLORS[1] },
             { on: creditIncluded && creditAvailable, w: Number(creditWeight) || 0, c: LEG_COLORS[2] },
             { on: illiquidsIncluded && illiquidsAvailable, w: Number(illiquidsWeight) || 0, c: LEG_COLORS[3] },
+            { on: smallCapsIncluded && smallCapsAvailable, w: Number(smallCapsWeight) || 0, c: LEG_COLORS[4] },
           ]
             .filter((x) => x.on && x.w > 0)
             .map((x, i) => (

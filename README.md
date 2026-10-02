@@ -26,7 +26,7 @@ cifras a la derecha.
   calendarios distintos, así que su cartera combinada usa retornos **anuales**: es una estimación más ruidosa y
   está marcada como tal en la propia pantalla.
 - En la Calculadora, **Seasonality y VIX Timing solo corren en una moneda a la vez**; la otra se estima con el
-  tipo de cambio EUR/USD de fin de año. **Ilíquidos** también corre solo en USD.
+  tipo de cambio EUR/USD de fin de año. **Ilíquidos** y **Small Caps** también corren solo en USD.
 - **Sharpe** acá es CAGR ÷ volatilidad, sin restar tasa libre de riesgo.
 - Un backtest histórico no garantiza que el resultado se repita.
 

@@ -69,6 +69,7 @@ export default function App() {
   const [vixTimingResult, setVixTimingResult] = useState(null);
   const [creditRotationResult, setCreditRotationResult] = useState(null);
   const [illiquidsResult, setIlliquidsResult] = useState(null);
+  const [smallCapsResult, setSmallCapsResult] = useState(null);
 
   useEffect(() => {
     localStorage.setItem(PORTFOLIOS_KEY, JSON.stringify(portfolios));
@@ -204,7 +205,7 @@ export default function App() {
 
         {activeTab === "vixTiming" && <VixTimingTab setStatus={setStatus} onResult={setVixTimingResult} />}
 
-        {activeTab === "smallCaps" && <SmallCapsTab setStatus={setStatus} />}
+        {activeTab === "smallCaps" && <SmallCapsTab setStatus={setStatus} onResult={setSmallCapsResult} />}
         {activeTab === "illiquids" && <IlliquidsTab setStatus={setStatus} onResult={setIlliquidsResult} />}
 
         {activeTab === "creditRotation" && (
@@ -218,6 +219,7 @@ export default function App() {
             vixTimingResult={vixTimingResult}
             creditRotationResult={creditRotationResult}
             illiquidsResult={illiquidsResult}
+            smallCapsResult={smallCapsResult}
           />
         )}
       </main>
