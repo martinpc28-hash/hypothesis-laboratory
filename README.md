@@ -35,7 +35,7 @@ cifras a la derecha.
 |---|---|
 | Backend | Java 17, Spring Boot 3, Maven |
 | Frontend | React 18 + Vite. Gráficos SVG propios (sin librería de charting), servidos desde el mismo jar de Spring Boot: un solo proceso, un solo origen, sin CORS. Diseño responsive. Tipografías Manrope + IBM Plex Mono |
-| Persistencia | PostgreSQL (Amazon RDS) vía Hibernate, **solo** para el motor de revaluación (ver más abajo). Las pestañas activas son stateless: recalculan en cada corrida desde las fuentes de datos |
+| Persistencia | Las pestañas no guardan nada: recalculan en cada corrida desde las fuentes de datos. La base (PostgreSQL en RDS) solo la usa código heredado |
 | Cómputo | Una instancia EC2, desplegada con S3 + SSM Run Command (sin SSH) |
 
 ### Fuentes de datos
@@ -53,7 +53,6 @@ cifras a la derecha.
 ├── pom.xml
 ├── src/main/java/com/martin/fullreval/
 │   ├── controller/   Seasonality, VixTiming, CreditRotation, Fx (tipo de cambio de la Calculadora)
-│   │                 + Portfolio, Scenario, Revaluation (motor de revaluación)
 │   ├── service/
 │   │   ├── SeasonalityService      estrategia de estacionalidad, filtro macro y Monte Carlo
 │   │   ├── VixTimingService        rotación S&P 500 / cash
@@ -61,12 +60,12 @@ cifras a la derecha.
 │   │   ├── FxRateService           tasas EUR/USD (FRED)
 │   │   ├── YahooFinanceService     precios crudos y ajustados
 │   │   ├── FredClient, EodhdClient clientes de datos externos
-│   │   └── RevaluationService, HistoricalScenarioService, MacroDataService, pricing/BlackScholesPricer
-│   ├── model/ repository/ dto/
+│   │   └── MacroDataService        series macro compartidas
+│   ├── dto/          un request por endpoint
+│   └── (código heredado de una versión anterior, sin uso en la UI: model/, repository/, pricing/)
 ├── src/main/resources/application.yml   perfiles local (H2) y rds (Postgres)
 ├── analysis/    scripts de Node para chequeos de robustez fuera de línea (bootstrap, subperíodos)
 │                cuyos resultados se citan en la UI: están acá para poder re-derivarlos
-├── infra/, sql/ plantillas de una ruta alternativa con Oracle (no es lo que está en vivo)
 └── frontend/
     ├── index.html            fuentes y reglas globales (táctil, alineación de tablas)
     └── src/
@@ -75,7 +74,6 @@ cifras a la derecha.
         ├── theme.js          tokens de diseño (colores, tipografías, estilos)
         ├── LineChart.jsx, ScatterChart.jsx, HeatmapGrid.jsx, AuditPanel.jsx ...
         └── tabs/             Info, Seasonality, VixTiming, CreditRotation, PortfolioCalculator
-                              (+ Dashboard, Portfolios, Scenarios del motor de revaluación, ocultas)
 ```
 
 ## Correrlo en local
@@ -99,20 +97,3 @@ Variables de entorno opcionales: `EODHD_API_KEY` (sin ella, Credit Rotation no p
    (systemd), baje el jar y reinicie.
 5. Los secretos (contraseña de la base, API key de EODHD) viven en **SSM Parameter Store** (SecureString) y
    un script de arranque los exporta como variables de entorno: no están en el jar ni en este repo.
-
-## El motor de revaluación original
-
-El proyecto empezó como un motor de **revaluación completa** de carteras: VaR en el que cada instrumento
-(bonos, opciones europeas, acciones) se vuelve a valuar desde cero bajo cada escenario de mercado, sin
-aproximación delta/gamma. Los escenarios pueden ser históricos reales (FRED y Yahoo Finance), sintéticos, o
-un estrés determinista (shock de tasas más presets macro).
-
-Sigue implementado y desplegado (endpoints y código intactos), pero las pestañas Dashboard, Carteras y
-Escenarios de estrés están **ocultas** de la barra de navegación. Sus límites conocidos: un solo shock
-compartido de tasa/vol/FX por escenario, sin estructura de correlación entre factores, presets de estrés
-ilustrativos (no calibrados a un episodio histórico) y sin backtest de la calibración del VaR.
-
-## Rama alternativa con Oracle
-
-`infra/` y `sql/schema.sql` describen un despliegue basado en Oracle (RDS o EC2 + Oracle Database Free) que
-**antecede** al Postgres actual y no es lo que está en vivo. Siguen funcionando si se quisiera levantar esa ruta.
