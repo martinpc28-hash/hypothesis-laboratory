@@ -15,16 +15,17 @@ precio exacto que lo produjo.
 | **VIX Timing** | Rotación entre S&P 500 y liquidez (letra del Tesoro a 3 meses o Euríbor) según el nivel del VIX: entra en acciones con VIX alto, vuelve a cash con VIX bajo. En USD o EUR corridos de forma independiente, con opción de cobertura cambiaria sintética. |
 | **Small Caps** | Estrategia armada a partir del paper del CFA Institute «Small Caps vs. Large Caps: The Cycle That's About to Turn». Tres señales con umbrales que se pueden mover: **ciclo** (spread de retorno a 10 años Russell 2000 − S&P 500), **valor relativo** (z-score de esa relación) y **tasas** (fed funds). Con suficientes señales encendidas mantiene small caps (Russell 2000, internacionales o global); si no, compra un **bono AAA** si su yield supera un mínimo (por defecto 4%) y lo mantiene hasta el vencimiento o lo vende cuando el yield cae lo suficiente; si el yield es bajo, se queda en letras del Tesoro. Incluye un **Monte Carlo** sobre los parámetros (¿depende el resultado de haber elegido justo estos números?) y un **bootstrap** en bloques de los retornos mensuales (¿cuánto es suerte del camino?). No modela P/B ni ROA del paper (sin datos históricos gratuitos), el bono usa el índice Aaa de Moody's como aproximación y no hay costos de transacción. |
 | **Ilíquidos** | Una cartera de inmobiliario, crédito privado, infraestructura y capital privado con los pesos que elijas y rebalanceo anual. Como no cotizan a diario (se valúan por tasación trimestral, que alisa las caídas), cada uno se representa con un **proxy cotizado con precio diario real** (VGSIX, FFRHX, XLU, VISVX; opcionales PSP y CSUAX), sin rendimientos inventados. Muestra también cómo se vería la misma cartera en un reporte trimestral, para medir cuánto riesgo esconde la tasación. |
-| **Calculadora** | Combina lo ya corrido en las pestañas anteriores con el % que asignes, con rebalanceo anual. Muestra siempre USD y EUR, un gráfico con cierres semanales y selector USD \| EUR, S&P 500 y MSCI World superpuestos, y Sharpe, correlación e Information Ratio contra ambos. |
+| **Calculadora** | Combina lo ya corrido en las pestañas anteriores con el % que asignes, con rebalanceo anual. Muestra siempre USD y EUR, un gráfico con cierres semanales y selector USD \| EUR, S&P 500 y MSCI World superpuestos, y Sharpe, correlación e Information Ratio contra ambos, con volatilidad y drawdown medidos sobre cierres semanales. |
 
 Todos los gráficos tienen leyenda clickeable (oculta o muestra una serie) y las tablas numéricas alinean las
 cifras a la derecha.
 
 ### Cómo leer los números
 
-- **Volatilidad y drawdown** de cada estrategia salen de retornos diarios. La **Calculadora** mezcla tres
-  calendarios distintos, así que su cartera combinada usa retornos **anuales**: es una estimación más ruidosa y
-  está marcada como tal en la propia pantalla.
+- **Volatilidad y drawdown** de cada estrategia salen de retornos diarios. La **Calculadora** mezcla
+  calendarios distintos, así que mide volatilidad, drawdown, Sharpe, correlación e Information Ratio sobre
+  **cierres semanales** (viernes); retorno total y CAGR salen de la mezcla anual. En EUR el movimiento semanal
+  es el del activo y solo el cierre de año usa el tipo de cambio real: es una aproximación.
 - En la Calculadora, **Seasonality y VIX Timing solo corren en una moneda a la vez**; la otra se estima con el
   tipo de cambio EUR/USD de fin de año. **Ilíquidos** y **Small Caps** también corren solo en USD.
 - **Sharpe** acá es CAGR ÷ volatilidad, sin restar tasa libre de riesgo.

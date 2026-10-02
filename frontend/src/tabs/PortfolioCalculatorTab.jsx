@@ -122,6 +122,55 @@ function informationRatio(portfolioReturns, benchmarkReturns) {
   return trackingError === 0 ? null : mean / trackingError;
 }
 
+// ---- Metrics from WEEKLY closes ---------------------------------------------------------------------
+// Volatility, drawdown, Sharpe, correlation and Information Ratio are measured on week-to-week
+// returns (Friday closes) instead of ~25 yearly numbers: 50x more observations, and a drawdown that
+// sees an intra-year drop. Total return and CAGR stay on the authoritative annual blend. The grid's
+// first date is the window start, so the first week's move isn't in the sample (negligible).
+const WEEKS_PER_YEAR = 52;
+const MIN_WEEKS = 26;
+
+function weeklyReturnsOf(points, key) {
+  const out = [];
+  let prev = null;
+  for (const p of points) {
+    const v = p[key];
+    if (v === undefined || v === null) continue;
+    const level = 1 + v;
+    if (prev !== null && prev !== 0) out.push(level / prev - 1);
+    prev = level;
+  }
+  return out;
+}
+
+function stdev(xs) {
+  const n = xs.length;
+  if (n < 2) return null;
+  const m = xs.reduce((a, b) => a + b, 0) / n;
+  return Math.sqrt(xs.reduce((s, x) => s + (x - m) * (x - m), 0) / (n - 1));
+}
+
+function weeklyRisk(returns) {
+  if (returns.length < MIN_WEEKS) return null;
+  const sd = stdev(returns);
+  if (!sd) return null;
+  let wealth = 1, peak = 1, maxDD = 0;
+  for (const r of returns) {
+    wealth *= 1 + r;
+    peak = Math.max(peak, wealth);
+    maxDD = Math.min(maxDD, wealth / peak - 1);
+  }
+  return { volatility: sd * Math.sqrt(WEEKS_PER_YEAR), maxDrawdown: maxDD };
+}
+
+// Same IR definition as informationRatio() above, but annualised from weekly active returns.
+function weeklyInformationRatio(pr, br) {
+  const excess = pr.map((r, i) => r - br[i]);
+  const sd = stdev(excess);
+  if (!sd) return null;
+  return (excess.reduce((a, b) => a + b, 0) / excess.length / sd) * Math.sqrt(WEEKS_PER_YEAR);
+}
+
 // Legs and benchmarks never share a hue: S&P 500 used to be the same amber as VIX Timing, which
 // made the chart ambiguous. Legs are solid lines, benchmarks are dashed grey/amber.
 const LEG_COLORS = [colors.primary, "#B48CFF", colors.success, "#F472B6", "#2DD4BF"];
@@ -649,6 +698,9 @@ export default function PortfolioCalculatorTab({
     usd.weeklyPoints = buildWeeklyChart(normalized, benchmarks, sortedYears, "weeklyUsdEntries");
     eur.weeklyPoints = buildWeeklyChart(normalized, benchmarks, sortedYears, "weeklyEurEntries");
 
+    applyWeeklyMetrics(usd, benchmarkMetricsUsd);
+    applyWeeklyMetrics(eur, benchmarkMetricsEur);
+
     setCalc({
       years: sortedYears,
       usd,
@@ -660,6 +712,33 @@ export default function PortfolioCalculatorTab({
       benchmarkMetricsEur,
       sharpeUsd: usd.portfolioStats.volatility ? usd.portfolioStats.cagr / usd.portfolioStats.volatility : null,
       sharpeEur: eur.portfolioStats.volatility ? eur.portfolioStats.cagr / eur.portfolioStats.volatility : null,
+    });
+  }
+
+  // Swaps volatility / max drawdown / correlation / IR for their weekly-close versions on one
+  // currency side, in place. Any series without enough weekly data keeps its annual figure.
+  function applyWeeklyMetrics(side, benchMetrics) {
+    side.weeklyBasis = false;
+    if (!side.weeklyPoints) return;
+    const pts = side.weeklyPoints;
+    const port = weeklyReturnsOf(pts, "cumulativePortfolio");
+    const portRisk = weeklyRisk(port);
+    if (!portRisk) return;
+    side.weeklyBasis = true;
+    side.weeklyObservations = port.length;
+    side.portfolioStats = { ...side.portfolioStats, ...portRisk };
+    side.legStats = side.legStats.map((l, i) => {
+      const risk = weeklyRisk(weeklyReturnsOf(pts, `cumulativeLeg${i}`));
+      return risk ? { ...l, stats: { ...l.stats, ...risk }, isReal: false } : l;
+    });
+    benchMetrics.forEach((m, bi) => {
+      const br = weeklyReturnsOf(pts, `cumulativeBenchmark${bi}`);
+      const risk = weeklyRisk(br);
+      if (!risk || br.length !== port.length) return;
+      m.stats = { ...m.stats, ...risk };
+      m.correlation = correlation(port, br);
+      m.informationRatio = weeklyInformationRatio(port, br);
+      m.n = port.length;
     });
   }
 
@@ -692,9 +771,9 @@ export default function PortfolioCalculatorTab({
           cada uno, y calcula qué rentabilidad hubiera dado la mezcla en el período en común — siempre en USD Y en
           EUR por separado, sea cual sea la estrategia elegida. Corré esas pestañas primero — esta calculadora no
           vuelve a pedir datos, solo mezcla lo que ya calculaste ahí. El rebalanceo es anual (a fin de cada año se
-          vuelve a los % originales), y la volatilidad/drawdown de la mezcla se calculan sobre retornos ANUALES (no
-          diarios, como en las otras pestañas) — con menos puntos, son estimaciones más ruidosas, y un drawdown solo
-          de fin de año puede no capturar una caída fuerte que se recuperó antes de diciembre.
+          vuelve a los % originales). Retorno total y CAGR salen de la mezcla anual; la volatilidad, el drawdown, el
+          Sharpe, la correlación y el Information Ratio se miden sobre los CIERRES SEMANALES (viernes), así que ven
+          las caídas que se recuperan dentro del año.
         </p>
         <p style={ui.cardSubtitle}>
           Seasonality, VIX Timing, Small Caps e Ilíquidos solo corren en UNA moneda a la vez (la que elegiste en su propia pestaña) — acá esa moneda se toma
@@ -969,12 +1048,12 @@ export default function PortfolioCalculatorTab({
                     <th style={ui.th}></th>
                     <th style={ui.th}>Retorno total</th>
                     <th style={ui.th}>CAGR</th>
-                    <th style={ui.th}>Vol. (anual)</th>
-                    <th style={ui.th}>Máx. DD (fin de año)</th>
+                    <th style={ui.th}>{calc.usd.weeklyBasis ? "Vol. (semanal)" : "Vol. (anual)"}</th>
+                    <th style={ui.th}>{calc.usd.weeklyBasis ? "Máx. DD (semanal)" : "Máx. DD (fin de año)"}</th>
                     <th style={{ ...ui.th, borderLeft: `1px solid ${colors.border}` }}>Retorno total</th>
                     <th style={ui.th}>CAGR</th>
-                    <th style={ui.th}>Vol. (anual)</th>
-                    <th style={ui.th}>Máx. DD (fin de año)</th>
+                    <th style={ui.th}>{calc.eur.weeklyBasis ? "Vol. (semanal)" : "Vol. (anual)"}</th>
+                    <th style={ui.th}>{calc.eur.weeklyBasis ? "Máx. DD (semanal)" : "Máx. DD (fin de año)"}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1046,11 +1125,17 @@ export default function PortfolioCalculatorTab({
               </table>
             </div>
             <p style={{ ...ui.muted, marginTop: 8 }}>
-              Las filas con <span style={{ color: colors.success }}>✓</span> muestran, en al menos una de las dos
-              columnas de moneda, la volatilidad y el máximo drawdown REALES (calculados sobre retornos diarios por
-              esa misma pestaña) — la otra columna de esa fila sigue siendo una conversión/aproximación. Las
-              columnas EUR de Seasonality y VIX Timing son siempre conversión por tipo de cambio, nunca un fondo
-              real en euros. Todas las filas están recortadas al período {calc.years[0]}–{calc.years[calc.years.length - 1]}.
+              {calc.usd.weeklyBasis
+                ? `Volatilidad (anualizada con √52) y drawdown se calculan sobre ${calc.usd.weeklyObservations} cierres semanales; en EUR, dentro de cada año el movimiento semanal es el del activo y solo el cierre de año usa el tipo de cambio real, así que el riesgo en EUR es una aproximación. Retorno total y CAGR vienen de la mezcla anual. `
+                : "Sin datos semanales suficientes: volatilidad y drawdown se calculan sobre retornos anuales. "}
+              {!calc.usd.weeklyBasis && (
+                <>
+                  Las filas con <span style={{ color: colors.success }}>✓</span> muestran la volatilidad y el máximo
+                  drawdown REALES (retornos diarios de esa pestaña); la otra columna es una conversión/aproximación.{" "}
+                </>
+              )}
+              Las columnas EUR de Seasonality, VIX Timing, Small Caps e Ilíquidos son siempre conversión por tipo de
+              cambio, nunca un fondo real en euros. Todas las filas están recortadas al período {calc.years[0]}–{calc.years[calc.years.length - 1]}.
             </p>
           </div>
 
@@ -1059,9 +1144,9 @@ export default function PortfolioCalculatorTab({
               <h3 style={ui.cardTitle}>Métricas vs. benchmarks</h3>
               <p style={ui.cardSubtitle}>
                 Sharpe acá es CAGR ÷ volatilidad (sin restar una tasa libre de riesgo — mismo criterio que ya usa
-                Credit Rotation para "ajustado por riesgo"). Correlación e Information Ratio se calculan sobre los
-                mismos retornos ANUALES que el resto de esta calculadora, no diarios — una estimación real pero más
-                ruidosa que la que daría un IR calculado sobre retornos diarios.
+                Credit Rotation para "ajustado por riesgo"). Con cierres semanales, la volatilidad, la
+                correlación y el Information Ratio se calculan sobre retornos de viernes a viernes (IR anualizado con
+                √52); sin datos semanales suficientes, sobre retornos anuales, que son estimaciones más ruidosas.
               </p>
               <div style={ui.tableScroll}>
                 <table className="num-right" style={ui.table}>
