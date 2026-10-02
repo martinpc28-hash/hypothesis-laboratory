@@ -8,6 +8,7 @@ import ScenariosTab from "./tabs/ScenariosTab.jsx";
 import SeasonalityTab from "./tabs/SeasonalityTab.jsx";
 import VixTimingTab from "./tabs/VixTimingTab.jsx";
 import CreditRotationTab from "./tabs/CreditRotationTab.jsx";
+import IlliquidsTab from "./tabs/IlliquidsTab.jsx";
 import PortfolioCalculatorTab from "./tabs/PortfolioCalculatorTab.jsx";
 
 const PORTFOLIOS_KEY = "fullreval.portfolios";
@@ -43,7 +44,8 @@ const TABS = [
   { key: "scenarios", label: "Escenarios de estrés", hidden: true },
   { key: "seasonality", label: "Seasonality" },
   { key: "vixTiming", label: "VIX Timing" },
-  { key: "creditRotation", label: "Credit Rotation" },
+  { key: "illiquids", label: "Ilíquidos" },
+  { key: "creditRotation", label: "Credit Rotation", hidden: true },
   { key: "portfolioCalculator", label: "Calculadora" },
 ];
 
@@ -64,6 +66,7 @@ export default function App() {
   const [seasonalityMacroResult, setSeasonalityMacroResult] = useState(null);
   const [vixTimingResult, setVixTimingResult] = useState(null);
   const [creditRotationResult, setCreditRotationResult] = useState(null);
+  const [illiquidsResult, setIlliquidsResult] = useState(null);
 
   useEffect(() => {
     localStorage.setItem(PORTFOLIOS_KEY, JSON.stringify(portfolios));
@@ -199,6 +202,8 @@ export default function App() {
 
         {activeTab === "vixTiming" && <VixTimingTab setStatus={setStatus} onResult={setVixTimingResult} />}
 
+        {activeTab === "illiquids" && <IlliquidsTab setStatus={setStatus} onResult={setIlliquidsResult} />}
+
         {activeTab === "creditRotation" && (
           <CreditRotationTab setStatus={setStatus} onResult={setCreditRotationResult} />
         )}
@@ -209,6 +214,7 @@ export default function App() {
             seasonalityMacroResult={seasonalityMacroResult}
             vixTimingResult={vixTimingResult}
             creditRotationResult={creditRotationResult}
+            illiquidsResult={illiquidsResult}
           />
         )}
       </main>

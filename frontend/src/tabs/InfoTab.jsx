@@ -26,16 +26,16 @@ const TABS = [
       "Rotación táctica entre S&P 500 y liquidez (letra del Tesoro a 3 meses o Euríbor) según el nivel del VIX: entra en acciones con VIX alto, vuelve a cash con VIX bajo. Corre en USD o en EUR (con opción de cobertura cambiaria sintética) de forma completamente independiente, no por conversión.",
   },
   {
-    name: "Credit Rotation",
+    name: "Ilíquidos",
     badge: "success",
     text:
-      "La misma lógica de rotación táctica pero entre bonos high-yield e investment-grade, disparada por 7 variables macro candidatas (spread de crédito, VIX, curva de rendimientos, nivel/cambio de tasas, inflación, crecimiento). USD e EUR son series 100% reales e independientes — fondos Vanguard en USD y fondos UCITS europeos (vía EODHD) en EUR, sin conversión cambiaria en ningún lado. La tabla año a año es auditable: cada número abre las operaciones activas o las fechas y precios exactos de ese año.",
+      "Una cartera de inmobiliario, crédito privado, infraestructura y capital privado con los pesos que elijas y rebalanceo anual. Como estos activos no cotizan a diario (se valúan por tasación trimestral, que alisa las caídas), cada uno se representa con un proxy cotizado con precio diario real, sin rendimientos inventados. Muestra además cómo se vería la misma cartera en un reporte trimestral, para medir cuánto riesgo esconde la tasación.",
   },
   {
     name: "Calculadora",
     badge: "neutral",
     text:
-      "Combina los resultados YA corridos en las 3 pestañas anteriores con el % que le asignes a cada una, con rebalanceo anual. Siempre muestra USD y EUR por separado (convierte por tipo de cambio la que corrió en una sola moneda), grafica cierres semanales en un solo gráfico con selector USD | EUR, superpone S&P 500 y MSCI World, y calcula Sharpe, correlación e Information Ratio contra ambos.",
+      "Combina los resultados YA corridos en las pestañas anteriores con el % que le asignes a cada una, con rebalanceo anual. Siempre muestra USD y EUR por separado (convierte por tipo de cambio la que corrió en una sola moneda), grafica cierres semanales en un solo gráfico con selector USD | EUR, superpone S&P 500 y MSCI World, y calcula Sharpe, correlación e Information Ratio contra ambos.",
   },
 ];
 
@@ -47,21 +47,23 @@ const STACK = [
 ];
 
 const DATA_SOURCES = [
-  { source: "Yahoo Finance", use: "Precios diarios de ETFs y fondos USD (ajustados por dividendos donde aplica) — sectores/países de Seasonality, S&P 500, VWEHX/VWESX de Credit Rotation" },
+  { source: "Yahoo Finance", use: "Precios diarios de ETFs y fondos USD (ajustados por dividendos donde aplica) — sectores/países de Seasonality, S&P 500 y los proxies de Ilíquidos (VGSIX, FFRHX, XLU, VISVX, PSP, CSUAX)" },
   { source: "FRED", use: "Series macro: VIX, T10Y2Y, DGS10, BAA10Y, CPIAUCSL, INDPRO, DTB3, DEXUSEU (tipo de cambio EUR/USD) — vía FredClient, con caché propio" },
-  { source: "EODHD", use: "Dataset EUFUND — NAV real de fondos mutuos europeos con histórico profundo (Candriam/DPAM para el lado EUR de Credit Rotation), algo que Yahoo Finance no expone más allá de ~3-4 años para fondos europeos" },
+  { source: "EODHD", use: "Dataset EUFUND — NAV real de fondos mutuos europeos con histórico profundo (Candriam/DPAM para el lado EUR de Credit Rotation, hoy oculta), algo que Yahoo Finance no expone más allá de ~3-4 años para fondos europeos" },
 ];
 
 const BACKEND_TREE = `src/main/java/com/martin/fullreval/
 ├── controller/
 │   ├── SeasonalityController.java      /api/seasonality/*
 │   ├── VixTimingController.java        /api/vix-timing/*
-│   ├── CreditRotationController.java   /api/credit-rotation/*
+│   ├── IlliquidsController.java        /api/illiquids/*
+│   ├── CreditRotationController.java   /api/credit-rotation/*  (pestaña oculta)
 │   └── FxController.java               /api/fx/*  (tipo de cambio para la Calculadora)
 ├── service/
 │   ├── SeasonalityService.java     motor de la estrategia de estacionalidad
 │   ├── VixTimingService.java       motor de rotación S&P 500 / cash
-│   ├── CreditRotationService.java  motor de rotación HY / IG (+ precios para auditar)
+│   ├── IlliquidsService.java       cartera de ilíquidos con proxies cotizados
+│   ├── CreditRotationService.java  motor de rotación HY / IG (oculto)
 │   ├── FxRateService.java          tasas EUR/USD (FRED) para conversión
 │   ├── YahooFinanceService.java    cliente de precios (crudo + ajustado)
 │   ├── FredClient.java             cliente de series FRED
@@ -82,7 +84,8 @@ const FRONTEND_TREE = `frontend/src/
     ├── InfoTab.jsx               esta página
     ├── SeasonalityTab.jsx
     ├── VixTimingTab.jsx
-    ├── CreditRotationTab.jsx
+    ├── IlliquidsTab.jsx
+    ├── CreditRotationTab.jsx          (oculta)
     └── PortfolioCalculatorTab.jsx`;
 
 function Row({ left, right }) {
@@ -105,7 +108,7 @@ export default function InfoTab() {
           que lo produjo.
         </p>
         <p style={ui.cardSubtitle}>
-          Tres estrategias sistemáticas independientes — estacionalidad, market timing con VIX y rotación de crédito — y
+          Dos estrategias sistemáticas — estacionalidad y market timing con VIX —, una cartera de ilíquidos y
           una calculadora que las combina. Hoy la app muestra las cuatro pestañas de abajo.
         </p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -136,8 +139,9 @@ export default function InfoTab() {
             World superpuestos, y métricas contra ambos (Sharpe, correlación, Information Ratio).
           </li>
           <li>
-            <strong>Credit Rotation auditable:</strong> la tabla año a año abre las operaciones activas o los precios
-            exactos de cada número.
+            <strong>Ilíquidos:</strong> pestaña nueva que reemplaza a Credit Rotation en el menú (su código sigue en el repo):
+            cartera de inmobiliario, crédito, infraestructura y capital privado con proxies cotizados y la comparación
+            contra un reporte trimestral. Ya se puede sumar en la Calculadora.
           </li>
           <li>
             <strong>Gráficos interactivos:</strong> clic en la leyenda para ocultar o mostrar una serie, en todas las
